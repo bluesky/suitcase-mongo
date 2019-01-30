@@ -100,5 +100,5 @@ class Serializer(event_model.DocumentRouter):
     def __repr__(self):
         # Display connection info in eval-able repr.
         return (f'{type(self).__name__}('
-                f'metadatastore_uri={self._metadatastore_uri}, '
-                f'asset_registry_uri={self._asset_registry_uri})')
+                f'metadatastore_uri={self._metadatastore_uri!r}, '
+                f'asset_registry_uri={self._asset_registry_uri!r})')
