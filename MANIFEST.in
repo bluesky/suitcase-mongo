@@ -1,0 +1,14 @@
+include LICENSE
+include README.md
+
+recursive-exclude * __pycache__
+recursive-exclude * *.py[co]
+
+recursive-include docs *.rst conf.py Makefile make.bat
+
+include versioneer.py
+include suitcase/mongo_layout1/_version.py
+include suitcase/mongo_layout2/_version.py
+
+# If including data files in the package, add them like:
+# include path/to/data_file
