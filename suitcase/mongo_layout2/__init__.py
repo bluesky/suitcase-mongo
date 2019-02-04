@@ -57,4 +57,54 @@ class Serializer(event_model.DocumentRouter):
 
     def __repr__(self):
         # Display connection info in eval-able repr.
-        return f'{type(self).__name__}(uri={self._uri!r})'
+        return f'{type(self).__name__}(uri={self._uri})'
+
+class DocBuffer():
+    from threading import Lock
+
+    def __init__(self, doc_type):
+        self.empty = True
+        self.event_buffer = defaultdict(lambda: defaultdict(dict)))
+        self.mutex = Lock()
+        self.dump_block = threading.Condition(self.mutex)
+
+        if doc_type == "event":
+            self.array_keys = set(["seq_num","time","uid"])
+            self.dataframe_keys = set(["data","timestamps","filled"])
+            self.stream_id = "descriptor"
+        elif doc_type == "datum":
+            self.array_keys = set(["datum_id"])
+            self.dataframe_keys = set(["datum_kwargs"])
+            self.stream_id = "resource"
+
+    def insert(self, doc):
+        self.mutex.acquire()
+        try:
+            __buffer_insert(doc)
+            self.empty = False
+        finally:
+            self.mutex.release()
+            self.dump_block.notify()
+
+    def dump(self):
+        while self.empty:
+             self.dump_block.wait()
+
+        self.mutex.acquire()
+        try:
+            event_buffer_dump = self.event_buffer
+            self.event_buffer = defaultdict(lambda: defaultdict(dict)))
+            self.empty = True
+        finally:
+            self.mutex.release()
+        return event_buffer_dump
+
+    def __buffer_insert(self, doc):
+        for key, value in doc.items():
+            if key in self.array_keys:
+                self.event_buffer[doc[self.stream_id][key].append(value)
+            elif key in self.dataframe_keys:
+                for inner_key, inner_value in doc[key].items():
+                    self.event_buffer[doc[self.stream_id]][key][inner_key].append(value)
+            else:
+                self.event_buffer[doc[self.stream_id][key] = value
