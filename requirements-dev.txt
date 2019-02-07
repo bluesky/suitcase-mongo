@@ -17,4 +17,5 @@ matplotlib
 numpydoc
 sphinx-copybutton
 sphinx_rtd_theme
+suitcase-utils
 trio  # required in order to import ophyd test fixtures
