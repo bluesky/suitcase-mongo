@@ -1,5 +1,4 @@
 import event_model
-from pathlib import Path
 import pymongo
 from ._version import get_versions
 
@@ -15,7 +14,7 @@ class Serializer(event_model.DocumentRouter):
 
         This layout uses a separate Mongo collection per document type and a
         separate Mongo document for each logical document.
-        
+
         Note that this Seralizer does not share the standard Serializer
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
