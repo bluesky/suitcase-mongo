@@ -57,4 +57,4 @@ class Serializer(event_model.DocumentRouter):
 
     def __repr__(self):
         # Display connection info in eval-able repr.
-        return f'{type(self).__name__}(uri={self._uri})'
+        return f'{type(self).__name__}(uri={self._uri!r})'
