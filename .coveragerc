@@ -1,0 +1,4 @@
+[run]
+branch = true
+include = suitcase/mongo_layout1/*
+omit = suitcase/mongo_layout1/_version.py
