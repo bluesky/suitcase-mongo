@@ -4,8 +4,9 @@ from ._version import get_versions
 from mongobox import MongoBox
 from pymongo import MongoClient
 import concurrent.futures
-import threading
-import time
+from pymongo import UpdateOne
+from pymongo.errors import BulkWriteError
+import sys
 
 __version__ = get_versions()['version']
 del get_versions
@@ -13,6 +14,7 @@ del get_versions
 
 class Serializer(event_model.DocumentRouter):
     # how to prevent the same run from being frozen two times?
+    # How do we integrate with the run engine?
 
     def __init__(self, permanent_db, volatile_db, num_threads=1, **kwargs):
         """
@@ -32,6 +34,7 @@ class Serializer(event_model.DocumentRouter):
         self._start_found = False
         self._run_uid = None
         self._frozen = False
+        self.MAX_DOC_SIZE = 5000  #Units are KB
 
         with ThreadPoolExecutor(max_workers = num_threads) as executor:
             self._event_workers = executor.submit(_event_worker)
@@ -39,7 +42,8 @@ class Serializer(event_model.DocumentRouter):
 
     def __call__(self, name, doc):
         if self._frozen:
-            raise RuntimeError("Cannot insert documents to frozen Serializer")
+            raise RuntimeError("Cannot insert documents into a "
+                               "frozen Serializer")
         sanitized_doc = doc.copy()
         _apply_to_dict_recursively(sanitized_doc, _sanitize_numpy)
         return super().__call__(name, sanitized_doc)
@@ -105,12 +109,25 @@ class Serializer(event_model.DocumentRouter):
     def _freeze_db(self):
         run = self._get_run(self._volatile_db, self._run_uid)
         self._insert_run(self._permanent_db, run)
+        self._volatile_db.header.drop()
+        self._volatile_db.events.drop()
+        self._volatile_db.datum.drop()
 
     def _get_run(self, db, run_uid):
-        ...
+        run = list()
+        header = db.header.find_one({'uid': run_uid})
+        run.append(('header',header))
+        for descriptor in header['descriptors']:
+            run += [('event',doc) for doc in
+                        db.events.find_many({'descriptor': descriptor})]
+        for resource in header{'resources']:
+            run += [('datum', doc) for doc in
+                        db.datum.find_many({'resource': resource})]
+        return run
 
     def _insert_run(self, db, run):
-        ...
+        for collection, doc in run:
+            result = db[collection].insert_one(doc)
 
     def _update_header(self, name,  doc):
         self._volatile_db.header.update_one(
@@ -118,14 +135,35 @@ class Serializer(event_model.DocumentRouter):
                         {name: doc}, {upsert: true}})
 
     def _update_events(self, event_pages):
-        operations = []
+        #should eventually update to bulk write
         for descriptor, event in event_pages:
-            operations.append(
-        ...
+            event_size = sys.getsizeof(event)
+            db.events.update(
+                { 'descriptor': descriptor, size { $lt : MAX_DOC_SIZE} },
+                {
+                    $push: {
+                        { 'uid' : {'$each' : event['uid']},
+                          'time' : {'$each' : event['time']},
+                          'seq_num' : {'$each' : event['seq_num']}
+                        }
+                    },
+                    $inc: { 'size' : event_size }
+                },
+                { upsert: true })
 
     def _update_datum(self, datum_pages):
-        operations = []
-        ...
+        #should eventually update to bulk write
+        for resource, datum in datum_pages_pages:
+            datum_size = sys.getsizeof(event)
+            db.events.update(
+                { 'resource': resource, size { $lt : MAX_DOC_SIZE} },
+                {
+                    $push: {
+                        { 'datum_id' : {'$each' : datum['datum_id']}}
+                    },
+                    $inc: { 'size' : datum_size }
+                },
+                { upsert: true })
 
     def _check_start(self, doc):
         if self._start_found:
@@ -184,6 +222,7 @@ class DocBuffer():
             self.stream_id = "resource"
 
     def insert(self, doc):
+        # Need to add code to check if buffer is full
         self.mutex.acquire()
         try:
             _buffer_insert(doc)
