@@ -77,7 +77,7 @@ author = 'suitcase.mongo Contributors'
 #
 import suitcase.mongo_layout2
 # The short X.Y version.
-version = suitcase.mongo.__version__
+version = suitcase.mongo_layout2.__version__
 # The full version, including alpha/beta/rc tags.
 release = version
 
