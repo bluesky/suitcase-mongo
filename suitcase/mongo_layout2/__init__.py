@@ -4,96 +4,73 @@ from ._version import get_versions
 from mongobox import MongoBox
 from pymongo import MongoClient
 import concurrent.futures
+import threading
+import time
 
 __version__ = get_versions()['version']
 del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
+    # how to prevent the same run from being frozen two times?
 
-    def __init__(self, permanent_uri, volatile_uri="mongobox", **kwargs):
+    def __init__(self, permanent_db, volatile_db, num_threads=1, **kwargs):
         """
         Insert documents into MongoDB using layout v2.
-
-        This layout uses ....
 
         Note that this Seralizer does not share the standard Serializer
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
-
-        The uri's must specify the database name.
         """
 
-        self._permanent_client = None
-        self._volatile_client = None
+        self._permanent_db = permanent_db
+        self._volatile_db = volatile_db
         self._event_buffer = DocBuffer('event')
         self._datum_buffer = DocBuffer('datum')
         kwargs.setdefault('cls', NumpyEncoder)
         self._kwargs = kwargs
         self._start_found = False
+        self._run_uid = None
+        self._frozen = False
 
-        try:
-            self._permanent_client = pymongo.MongoClient(permanent_uri)
-        except pymongo.errors.ConfigurationError as err:
-            raise ValueError(f"Invalid uri: {permanent_uri} ") from err
-
-        if volatile_uri == 'mongobox':
-            box = MongoBox()
-            box.start()
-            self._volatile_client = box.client()
-        else
-            try:
-                self._volatile_client = pymongo.MongoClient(volatile_uri)
-            except pymongo.errors.ConfigurationError as err:
-                raise ValueError(f"Invalid uri: {volatile_uri} ") from err
-
-        with ThreadPoolExecutor(max_workers=1) as executor:
+        with ThreadPoolExecutor(max_workers = num_threads) as executor:
             self._event_workers = executor.submit(_event_worker)
             self._datum_workers = executor.submit(_datum_worker)
 
     def __call__(self, name, doc):
-        # Before inserting into mongo, convert any numpy objects into built-in
-        # Python types compatible with pymongo.
+        if self._frozen:
+            raise RuntimeError("Cannot insert documents to frozen Serializer")
         sanitized_doc = doc.copy()
         _apply_to_dict_recursively(sanitized_doc, _sanitize_numpy)
         return super().__call__(name, sanitized_doc)
 
     def _event_worker(self):
-        #TODO should be updated with bulk write
-        while True:
-            event_dump = _event_buffer.dump()
-            for descriptor, page in event_dump.items():
-                event_page(page)
+        while not self._frozen:
+            event_dump = self._event_buffer.dump()
+            self._update_events(event_dump)
 
     def _datum_worker(self):
-        #TODO should be updated with bulk write
-        while True:
-            datum_dump = _datum_buffer.dump()
-            for descriptor, page in datum_dump.items():
-                datum_page(page)
+        while not self._frozen:
+            datum_dump = self._datum_buffer.dump()
+            self._update_datum(datum_dump)
 
     def start(self, doc):
         self._check_start(doc)
-        result = self._volatile_client.header.insert_one(doc)
+        self._run_uid = doc['uid']
+        self._update_header('start', doc)
         return doc
 
     def stop(self, doc):
-        result = self._volatile_client.header.insert_one(doc)
-        self.freeze()
+        self._update_header('stop', doc)
+        self.close()
         return doc
 
     def descriptor(self, doc):
-        result = self._volatile_client.header.insert_one(doc)
+        self._update_header('descriptor', doc)
         return doc
 
     def resource(self, doc):
-        result = self._volatile_client.header.insert_one(doc)
-        return doc
-
-    def event_page(self, doc):
-        return doc
-
-    def datum_page(self, doc):
+        self._update_header('resource', doc)
         return doc
 
     def event(self,doc):
@@ -104,25 +81,58 @@ class Serializer(event_model.DocumentRouter):
         self._datum_buffer.insert(doc)
         return doc
 
-    def freeze(self):
-        if not self._event_buffer.empty:
-            for descriptor, page in self._event_buffer.dump().items():
-               self.event_page(page)
-        if not self._datum_buffer.empty:
-            for descriptor, page in self_datum_buffer.dump().items():
-               self.datum_page(page)
-        self.volatile_to_perminant_db()
+    def event_page(self, doc):
+        self._update_events({doc['descriptor']:doc})
+        return doc
 
-    def volatile_to_permanent_db(self):
+    def datum_page(self, doc):
+        self._update_datum({doc['descriptor']:doc})
+        return doc
+
+    def close(self):
+        self.freeze()
+
+    def freeze(self):
+        self._frozen = True
+        self._event_workers.shutdown(wait=True)
+        self._datum_workers.shutdown(wait=True)
+        if not self._event_buffer.empty:
+            self._event_worker()
+        if not self._datum_buffer.empty:
+            self._datum_worker()
+        self._freeze_db()
+
+    def _freeze_db(self):
+        run = self._get_run(self._volatile_db, self._run_uid)
+        self._insert_run(self._permanent_db, run)
+
+    def _get_run(self, db, run_uid):
         ...
 
+    def _insert_run(self, db, run):
+        ...
+
+    def _update_header(self, name,  doc):
+        self._volatile_db.header.update_one(
+                        {'run_id': self.run_id}, {'$push':
+                        {name: doc}, {upsert: true}})
+
+    def _update_events(self, event_pages):
+        operations = []
+        for descriptor, event in event_pages:
+            operations.append(
+        ...
+
+    def _update_datum(self, datum_pages):
+        operations = []
+        ...
 
     def _check_start(self, doc):
         if self._start_found:
             raise RuntimeError(
                 "The serializer in suitcase-mongo expects "
                 "documents from one run only. Two `start` documents were "
-                "sent to it")
+                "received.")
         else:
             self._start_found = True
 
@@ -185,7 +195,10 @@ class DocBuffer():
     def dump(self):
         while self.empty:
              self.dump_block.wait()
-
+        # I think i need an if statement here to check if there is something in
+        # the buffer. 2 workers could be  calling dump at the same time ans
+        # sleeping. then if something inserts it will wake both of the workers.
+        # This could cause a worker to get an empty dictionary.
         self.mutex.acquire()
         try:
             event_buffer_dump = self.event_buffer
