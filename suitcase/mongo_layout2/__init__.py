@@ -25,16 +25,16 @@ class Serializer(event_model.DocumentRouter):
         via pymongo, not to an arbitrary user-provided buffer.
         """
 
+        self._MAX_DOC_SIZE = 5000  #Units are KB
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
-        self._event_buffer = DocBuffer('event')
-        self._datum_buffer = DocBuffer('datum')
+        self._event_buffer = DocBuffer('event', self._MAX_DOC_SIZE)
+        self._datum_buffer = DocBuffer('datum', self._MAX_DOC_SIZE)
         kwargs.setdefault('cls', NumpyEncoder)
         self._kwargs = kwargs
         self._start_found = False
         self._run_uid = None
         self._frozen = False
-        self.MAX_DOC_SIZE = 5000  #Units are KB
 
         with ThreadPoolExecutor(max_workers = num_threads) as executor:
             self._event_workers = executor.submit(_event_worker)
@@ -51,12 +51,12 @@ class Serializer(event_model.DocumentRouter):
     def _event_worker(self):
         while not self._frozen:
             event_dump = self._event_buffer.dump()
-            self._update_events(event_dump)
+            self._bulkwrite_eventbuffer(event_dump)
 
     def _datum_worker(self):
         while not self._frozen:
             datum_dump = self._datum_buffer.dump()
-            self._update_datum(datum_dump)
+            self._bulkwrite_datumbuffer(datum_dump)
 
     def start(self, doc):
         self._check_start(doc)
@@ -90,7 +90,7 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def datum_page(self, doc):
-        self._update_datum({doc['descriptor']:doc})
+        self._update_datum({doc['resource']:doc})
         return doc
 
     def close(self):
@@ -129,41 +129,43 @@ class Serializer(event_model.DocumentRouter):
         for collection, doc in run:
             result = db[collection].insert_one(doc)
 
-    def _update_header(self, name,  doc):
+    def _insert_header(self, name,  doc):
         self._volatile_db.header.update_one(
                         {'run_id': self.run_id}, {'$push':
                         {name: doc}, {upsert: true}})
 
-    def _update_events(self, event_pages):
-        #should eventually update to bulk write
-        for descriptor, event in event_pages:
-            event_size = sys.getsizeof(event)
-            db.events.update(
-                { 'descriptor': descriptor, size { $lt : MAX_DOC_SIZE} },
-                {
-                    $push: {
-                        { 'uid' : {'$each' : event['uid']},
-                          'time' : {'$each' : event['time']},
-                          'seq_num' : {'$each' : event['seq_num']}
-                        }
-                    },
-                    $inc: { 'size' : event_size }
-                },
-                { upsert: true })
+    def _bulkwrite_datum_buffer(self, datum_buffer):
+        operations = [self._updateone_datumpage(resource, datum) for resource,
+                        datum in datum_buffer]
+        self._volatile_db.bulkrite(operations)
 
-    def _update_datum(self, datum_pages):
-        #should eventually update to bulk write
-        for resource, datum in datum_pages_pages:
-            datum_size = sys.getsizeof(event)
-            db.events.update(
-                { 'resource': resource, size { $lt : MAX_DOC_SIZE} },
-                {
-                    $push: {
-                        { 'datum_id' : {'$each' : datum['datum_id']}}
-                    },
-                    $inc: { 'size' : datum_size }
-                },
-                { upsert: true })
+    def _bulkwrite_event_buffer(self, event_buffer):
+        operations = [self._updateone_eventpage(descriptor, event) for descriptor,
+                        event in event_buffer)
+        self._volatile_db.events.bulkwrite(operations)
+
+    def _updateone_eventpage(self, eventpage):
+        event_size = sys.getsizeof(eventpage)
+        return UpdateOne(
+            { 'descriptor': descriptor, size { $lt : self._MAX_DOC_SIZE }},
+            {   $push: {
+                       { 'uid' : {'$each' : event['uid']},
+                         'time' : {'$each' : event['time']},
+                         'seq_num' : {'$each' : event['seq_num']}}
+            },
+                $inc: { 'size' : event_size }},
+            { upsert: true })
+
+    def _updateone_datumpage(self, datum_pages):
+        datum_size = sys.getsizeof(event)
+        return UpdateOne(
+            { 'resource': resource, size { $lt : self._MAX_DOC_SIZE} },
+            {
+                $push: {
+                       { 'datum_id' : {'$each' : datum['datum_id']}
+                       }},
+                $inc: { 'size' : datum_size }},
+            { upsert: true })
 
     def _check_start(self, doc):
         if self._start_found:
@@ -206,11 +208,14 @@ class DocBuffer():
 
     from threading import Lock
 
-    def __init__(self, doc_type):
+    def __init__(self, doc_type, max_size):
         self.empty = True
+        self.max_size = max_size
+        self.current_size = 0
         self.event_buffer = defaultdict(lambda: defaultdict(dict)))
         self.mutex = Lock()
         self.dump_block = threading.Condition(self.mutex)
+        self.insert_block = threading.Condition(self.mutex)
 
         if doc_type == "event":
             self.array_keys = set(["seq_num","time","uid"])
@@ -222,11 +227,14 @@ class DocBuffer():
             self.stream_id = "resource"
 
     def insert(self, doc):
-        # Need to add code to check if buffer is full
+        while self.current_size > self.max_size:
+            self.insert_block.wait()
+
         self.mutex.acquire()
         try:
             _buffer_insert(doc)
             self.empty = False
+            self.current_size += sys.getsizeof(doc)
         finally:
             self.mutex.release()
             self.dump_block.notify()
@@ -245,6 +253,7 @@ class DocBuffer():
             self.empty = True
         finally:
             self.mutex.release()
+            self.insert_block.notify()
         return event_buffer_dump
 
     def _buffer_insert(self, doc):
@@ -253,6 +262,7 @@ class DocBuffer():
                 self.event_buffer[doc[self.stream_id][key].append(value)
             elif key in self.dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    self.event_buffer[doc[self.stream_id]][key][inner_key].append(value)
+                    self.event_buffer[doc[self.stream_id]][key][inner_key]
+                        .append(value)
             else:
                 self.event_buffer[doc[self.stream_id][key] = value
