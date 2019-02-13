@@ -8,7 +8,7 @@ del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
-    def __init__(self, metadatastore_client, asset_registry_client):
+    def __init__(self, metadatastore_db, asset_registry_db):
         """
         Insert documents into MongoDB using layout v1.
 
@@ -19,26 +19,14 @@ class Serializer(event_model.DocumentRouter):
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
         """
-        self._metadatastore_client = metadatastore_client
-        self._asset_registry_client = asset_registry_client
-
-        try:
-            # Called with no args, get_database() returns the database
-            # specified in the client's uri --- or raises if there was none.
-            # There is no public method for checking this in advance, so we
-            # just catch the error.
-            mds_db = self._metadatastore_client.get_database()
-        except pymongo.errors.ConfigurationError as err:
-            raise ValueError(
-                f"Invalid metadatastore_client: {metadatastore_client} "
-                f"Did you forget to include a database?") from err
-        try:
-            assets_db = self._asset_registry_client.get_database()
-        except pymongo.errors.ConfigurationError as err:
-            raise ValueError(
-                f"Invalid asset_registry_client: {asset_registry_client} "
-                f"Did you forget to include a database?") from err
-
+        if isinstance(metadatastore_db, str):
+            mds_db = _get_database(metadatastore_db)
+        else:
+            mds_db = metadatastore_db
+        if isinstance(asset_registry_db, str):
+            assets_db = _get_database(asset_registry_db)
+        else:
+            assets_db = asset_registry_db
         self._run_start_collection = mds_db.get_collection('run_start')
         self._run_stop_collection = mds_db.get_collection('run_stop')
         self._event_descriptor_collection = mds_db.get_collection('event_descriptor')
@@ -99,5 +87,19 @@ class Serializer(event_model.DocumentRouter):
     def __repr__(self):
         # Display connection info in eval-able repr.
         return (f'{type(self).__name__}('
-                f'metadatastore_client={self._metadatastore_client!r}, '
-                f'asset_registry_client={self._asset_registry_client!r})')
+                f'metadatastore_db={self._metadatastore_db!r}, '
+                f'asset_registry_db={self._asset_registry_db!r})')
+
+
+def _get_database(uri):
+    client = pymongo.MongoClient(uri)
+    try:
+        # Called with no args, get_database() returns the database
+        # specified in the client's uri --- or raises if there was none.
+        # There is no public method for checking this in advance, so we
+        # just catch the error.
+        return client.get_database()
+    except pymongo.errors.ConfigurationError as err:
+        raise ValueError(
+            f"Invalid client: {client} "
+            f"Did you forget to include a database?") from err
