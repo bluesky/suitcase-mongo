@@ -11,12 +11,12 @@ import uuid
 def db_factory(request):
     def inner():
         database_name = f'test-{str(uuid.uuid4())}'
-        uri = f'mongodb://localhost:27017/{database_name}'
+        uri = f'mongodb://localhost:27017/'
         client = pymongo.MongoClient(uri)
 
         def drop():
             client.drop_database(database_name)
 
         request.addfinalizer(drop)
-        return client
+        return client[database_name]
     return inner
