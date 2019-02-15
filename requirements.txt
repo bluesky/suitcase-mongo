@@ -1,4 +1,2 @@
 # List required packages in this file, one per line.
 pymongo
-threading
-collections

@@ -1,7 +1,7 @@
 import event_model
 from pathlib import Path
 #from ._version import get_versions
-from mongobox import MongoBox
+#from mongobox import MongoBox
 from collections import defaultdict
 from pymongo import MongoClient
 from concurrent.futures import ThreadPoolExecutor
@@ -9,6 +9,8 @@ from pymongo import UpdateOne
 from pymongo.errors import BulkWriteError
 import threading
 import sys
+from time import sleep
+import pdb
 
 #__version__ = get_versions()['version']
 #del get_versions
@@ -26,8 +28,6 @@ class Serializer(event_model.DocumentRouter):
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
         """
-        print("init start")
-
         self._MAX_DOC_SIZE = 5000000 #Units are Bytes
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
@@ -39,16 +39,13 @@ class Serializer(event_model.DocumentRouter):
         self._run_uid = None
         self._frozen = False
 
-        print("init middle")
-
-        with ThreadPoolExecutor(max_workers = num_threads) as executor:
-            self._executor = executor
-            executor.submit(self._event_worker)
-            executor.submit(self._datum_worker)
-
-        print("init end")
+        self._executor = ThreadPoolExecutor(max_workers=num_threads)
+        self._executor.submit(self._event_worker)
+        self._executor.submit(self._datum_worker)
 
     def __call__(self, name, doc):
+        print(name, doc)
+        print()
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
                                "frozen Serializer")
@@ -59,17 +56,21 @@ class Serializer(event_model.DocumentRouter):
     def _event_worker(self):
         while not self._frozen:
             event_dump = self._event_buffer.dump()
-            self._bulkwrite_eventbuffer(event_dump)
+            self._bulkwrite_event(event_dump)
+        print("event worker closed")
 
     def _datum_worker(self):
         while not self._frozen:
             datum_dump = self._datum_buffer.dump()
-            self._bulkwrite_datumbuffer(datum_dump)
+            self._bulkwrite_datum(datum_dump)
+        print("datum worker closed")
 
     def start(self, doc):
         self._check_start(doc)
         self._run_uid = doc['uid']
         self._insert_header('start', doc)
+        print('start', doc)
+        print()
         return doc
 
     def stop(self, doc):
@@ -94,22 +95,27 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def event_page(self, doc):
-        self._bulkwrite_event_buffer({doc['descriptor']:doc})
+        self._bulkwrite_event({doc['descriptor']:doc})
         return doc
 
     def datum_page(self, doc):
-        self._bulkwrite_datum_buffer({doc['resource']:doc})
+        self._bulkwrite_datum({doc['resource']:doc})
         return doc
 
     def close(self):
         self._freeze()
 
     def _freeze(self):
+        print("Freeze")
         self._frozen = True
+        self._event_buffer.freeze()
+        self._datum_buffer.freeze()
         self._executor.shutdown(wait=True)
-        if self._event_buffer.current_size > 0:
+        print("shutdown")
+
+        if self._event_buffer._current_size > 0:
             self._event_worker()
-        if self._datum_buffer.current_size > 0:
+        if self._datum_buffer._current_size > 0:
             self._datum_worker()
 
         volatile_run = self._get_run(self._volatile_db, self._run_uid)
@@ -141,15 +147,15 @@ class Serializer(event_model.DocumentRouter):
 
     def _insert_header(self, name,  doc):
         self._volatile_db.header.update_one(
-                        {'run_id': self.run_id}, {'$push':
-                        {name: doc}}, {upsert: true})
+                        {'run_id': self._run_uid}, {'$push':
+                        {name: doc}}, upsert=True)
 
-    def _bulkwrite_datum_buffer(self, datum_buffer):
+    def _bulkwrite_datum(self, datum_buffer):
         operations = [self._updateone_datumpage(resource, datum)
                         for resource, datum in datum_buffer]
         self._volatile_db.bulkrite(operations)
 
-    def _bulkwrite_event_buffer(self, event_buffer):
+    def _bulkwrite_event(self, event_buffer):
         operations = [self._updateone_eventpage(descriptor, event)
                         for descriptor, event in event_buffer]
         self._volatile_db.events.bulkwrite(operations)
@@ -177,10 +183,10 @@ class Serializer(event_model.DocumentRouter):
                            **filled_string}
             },
             {    '$inc' : { 'size' : event_size }},
-            { upsert: true })
+            upsert=True)
 
     def _updateone_datumpage(self, resource, datumpage):
-        datum_size = sys.getsizeof(event)
+        datum_size = sys.getsizeof(datumpage)
 
         kwargs_string = {'datum_kwargs.' + key : {'$each' : value_array}
                 for key, value_array in datumpage['datum_kwargs']}
@@ -188,11 +194,11 @@ class Serializer(event_model.DocumentRouter):
         return UpdateOne(
             { 'resource': resource, 'size' : { '$lt' : self._MAX_DOC_SIZE} },
             { '$push' :
-                       { 'datum_id' : {'$each' : datum['datum_id']},
+                       { 'datum_id' : {'$each' : datumpage['datum_id']},
                        **kwargs_string}
             },
             { '$inc' : { 'size' : datum_size }},
-            { upsert: true })
+            upsert=True)
 
     def _check_start(self, doc):
         if self._start_found:
@@ -205,7 +211,7 @@ class Serializer(event_model.DocumentRouter):
 
     def __repr__(self):
         # Display connection info in eval-able repr.
-        return f'{type(self).__name__}(uri={self._uri})'
+        return "temp repr" #f'{type(self).__name__}(run_uid={self._run_uid})'
 
 
 class DocBuffer():
@@ -240,6 +246,7 @@ class DocBuffer():
         self._mutex = threading.Lock()
         self._dump_block = threading.Condition(self._mutex)
         self._insert_block = threading.Condition(self._mutex)
+        self._frozen = False
 
         if doc_type == "event":
             self._array_keys = set(["seq_num","time","uid"])
@@ -251,30 +258,30 @@ class DocBuffer():
             self._stream_id = "resource"
 
     def insert(self, doc):
+        #pdb.set_trace()
         with self._insert_block:
             self._insert_block.wait_for(lambda :
-                                    self._current_size > self._max_size)
-
+                                    self._current_size < self._max_size)
         self._mutex.acquire()
         try:
-            _buffer_insert(doc)
+            self._buffer_insert(doc)
             self._current_size += sys.getsizeof(doc)
+            self._dump_block.notify()
         finally:
             self._mutex.release()
-            self._dump_block.notify()
 
     def dump(self):
         with self._dump_block:
-            self._dump_block.wait_for(lambda: self._current_size)
+            self._dump_block.wait_for(lambda: self._current_size or self._frozen)
 
         self._mutex.acquire()
         try:
             event_buffer_dump = self._doc_buffer
             self.doc_buffer = defaultdict(lambda: defaultdict(dict))
             self._current_size = 0
+            self._insert_block.notify()
         finally:
             self._mutex.release()
-            self._insert_block.notify()
         return event_buffer_dump
 
     def _buffer_insert(self, doc):
@@ -283,6 +290,13 @@ class DocBuffer():
                 self._doc_buffer[doc[self._stream_id][key]].append(value)
             elif key in self._dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    self._doc_buffer[doc[self._stream_id][key][inner_key]].append(value)
+                    self._doc_buffer[doc[self._stream_id][key][inner_key]] \
+                        .append(inner_value)
             else:
                 self._doc_buffer[doc[self._stream_id][key]] = value
+
+    def freeze(self):
+        self._frozen = True
+        self._mutex.acquire()
+        self._dump_block.notify()
+        self._mutex.release()
