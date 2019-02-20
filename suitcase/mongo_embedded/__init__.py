@@ -10,8 +10,8 @@ from pymongo.errors import BulkWriteError
 import threading
 import sys
 from time import sleep
+import json
 import pdb
-
 #__version__ = get_versions()['version']
 #del get_versions
 
@@ -20,7 +20,8 @@ class Serializer(event_model.DocumentRouter):
     # how to prevent the same run from being frozen two times?
     # How do we integrate with the run engine?
 
-    def __init__(self, volatile_db, permanent_db, num_threads=1, **kwargs):
+    def __init__(self, volatile_db, permanent_db, num_threads=1,
+                   max_doc_size=5000000, **kwargs):
         """
         Insert documents into MongoDB using layout v2.
 
@@ -28,7 +29,7 @@ class Serializer(event_model.DocumentRouter):
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
         """
-        self._MAX_DOC_SIZE = 5000000 #Units are Bytes
+        self._MAX_DOC_SIZE = max_doc_size
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
         self._event_buffer = DocBuffer('event', self._MAX_DOC_SIZE)
@@ -44,8 +45,6 @@ class Serializer(event_model.DocumentRouter):
         self._executor.submit(self._datum_worker)
 
     def __call__(self, name, doc):
-        print(name, doc)
-        print()
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
                                "frozen Serializer")
@@ -56,6 +55,7 @@ class Serializer(event_model.DocumentRouter):
     def _event_worker(self):
         while not self._frozen:
             event_dump = self._event_buffer.dump()
+            print(event_dump)
             self._bulkwrite_event(event_dump)
         print("event worker closed")
 
@@ -69,8 +69,6 @@ class Serializer(event_model.DocumentRouter):
         self._check_start(doc)
         self._run_uid = doc['uid']
         self._insert_header('start', doc)
-        print('start', doc)
-        print()
         return doc
 
     def stop(self, doc):
@@ -115,6 +113,8 @@ class Serializer(event_model.DocumentRouter):
             self._event_worker()
         if self._datum_buffer._current_size > 0:
             self._datum_worker()
+
+        pdb.set_trace()
 
         volatile_run = self._get_run(self._volatile_db, self._run_uid)
         self._insert_run(self._permanent_db, volatile_run)
@@ -161,52 +161,50 @@ class Serializer(event_model.DocumentRouter):
 
     def _bulkwrite_datum(self, datum_buffer):
         operations = [self._updateone_datumpage(resource, datum)
-                        for resource, datum in datum_buffer]
-        self._volatile_db.bulkrite(operations)
+                        for resource, datum in datum_buffer.items()]
+        self._volatile_db.bulkrite(operations, ordered=False)
 
     def _bulkwrite_event(self, event_buffer):
-        operations = [self._updateone_eventpage(descriptor, event)
-                        for descriptor, event in event_buffer]
-        self._volatile_db.events.bulkwrite(operations)
+        operations = [self._updateone_eventpage(descriptor, eventpage) \
+                        for descriptor, eventpage in event_buffer.items()]
+        print("operations: ", operations)
+        self._volatile_db.events.bulkwrite(operations, ordered=False)
 
     def _updateone_eventpage(self, descriptor, eventpage):
+        print("updateone_eventpage")
         event_size = sys.getsizeof(eventpage)
 
-        data_string = {'data.' + key : {'$each' : value_array}
-                for key, value_array in eventpage['data']}
+        data_string = {'data.' + key : value_array
+                for key, value_array in eventpage['data'].items()}
 
-        timestamp_string =  {'timestamps.' + key : {'$each' : value_array}
-                for key, value_array in eventpage['timestamps']}
+        timestamp_string =  {'timestamps.' + key : value_array
+                for key, value_array in eventpage['timestamps'].items()}
 
-        filled_string = {'filled.' + key : {'$each' : value_array}
-                for key, value_array in eventpage['filled']}
+        filled_string = {'filled.' + key : value_array
+                for key, value_array in eventpage['filled'].items()}
+
+        update_string = {**data_string, **timestamp_string, **filled_string}
 
         return UpdateOne(
-            { 'descriptor': descriptor,'size': { '$lt' : self._MAX_DOC_SIZE }},
-            { '$push' :
-                        { 'uid' : {'$each' : eventpage['uid']},
-                          'time' : {'$each' : eventpage['time']},
-                          'seq_num' : {'$each' : eventpage['seq_num']},
-                           **data_string,
-                           **timestamp_string,
-                           **filled_string}
-            },
-            {    '$inc' : { 'size' : event_size }},
+            {'descriptor': descriptor,'size': {'$lt': self._MAX_DOC_SIZE}},
+            {'$pushall': {'uid': eventpage['uid'],
+                          'time': eventpage['time'],
+                          'seq_num': eventpage['seq_num'],
+                          **update_string},
+            '$inc': {'size':event_size}},
             upsert=True)
 
     def _updateone_datumpage(self, resource, datumpage):
         datum_size = sys.getsizeof(datumpage)
 
-        kwargs_string = {'datum_kwargs.' + key : {'$each' : value_array}
-                for key, value_array in datumpage['datum_kwargs']}
+        kwargs_string = {'datum_kwargs.' + key : value_array
+                for key, value_array in datumpage['datum_kwargs'].items()}
 
         return UpdateOne(
-            { 'resource': resource, 'size' : { '$lt' : self._MAX_DOC_SIZE} },
-            { '$push' :
-                       { 'datum_id' : {'$each' : datumpage['datum_id']},
-                       **kwargs_string}
-            },
-            { '$inc' : { 'size' : datum_size }},
+            {'resource': resource,'size': {'$lt': self._MAX_DOC_SIZE}},
+            {'$pushall': {'datum_id': datumpage['uid'],
+                          **kwargs_string},
+            '$inc': {'size': datum_size}},
             upsert=True)
 
     def _check_start(self, doc):
@@ -254,63 +252,58 @@ class DocBuffer():
         self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
                                                     defaultdict(list)))
         self._mutex = threading.Lock()
-        self._dump_block = threading.Condition(self._mutex)
-        self._insert_block = threading.Condition(self._mutex)
+        self._not_full = threading.Condition(self._mutex)
+        self._not_empty = threading.Condition(self._mutex)
         self._frozen = False
 
         if doc_type == "event":
             self._array_keys = set(["seq_num","time","uid"])
             self._dataframe_keys = set(["data","timestamps","filled"])
-            self._stream_id = "descriptor"
+            self._stream_id_key = "descriptor"
         elif doc_type == "datum":
             self._array_keys = set(["datum_id"])
             self._dataframe_keys = set(["datum_kwargs"])
-            self._stream_id = "resource"
+            self._stream_id_key = "resource"
 
 
     def insert(self, doc):
-        #pdb.set_trace()
-        with self._insert_block:
-            self._insert_block.wait_for(lambda :
+        print("insert start")
+        with self._not_full:
+            self._not_full.wait_for(lambda :
                                     self._current_size < self._max_size)
-        self._mutex.acquire()
-        try:
+            print("insert insert")
             self._buffer_insert(doc)
             self._current_size += sys.getsizeof(doc)
-            self._dump_block.notify()
-        finally:
-            self._mutex.release()
+            self._not_empty.notify()
 
     def dump(self):
-        with self._dump_block:
-            self._dump_block.wait_for(lambda: self._current_size or self._frozen)
-
-        self._mutex.acquire()
-        try:
+        print("dump start")
+        with self._not_empty:
+            self._not_empty.wait_for(lambda: (
+                                self._current_size or self._frozen))
+            print("dump dump")
             event_buffer_dump = self._doc_buffer
             self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
                                                         defaultdict(list)))
             self._current_size = 0
-            self._insert_block.notify()
-        finally:
-            self._mutex.release()
-        return event_buffer_dump
+            self._not_full.notify()
+            return event_buffer_dump
 
     def _buffer_insert(self, doc):
         for key, value in doc.items():
             if key in self._array_keys:
-                self._doc_buffer[doc[self._stream_id]][key] = list(
-                    self._doc_buffer[doc[self._stream_id]][key])
-                self._doc_buffer[doc[self._stream_id]][key].append(value)
+                self._doc_buffer[doc[self._stream_id_key]][key] = list(
+                    self._doc_buffer[doc[self._stream_id_key]][key])
+                self._doc_buffer[doc[self._stream_id_key]][key].append(value)
             elif key in self._dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    self._doc_buffer[doc[self._stream_id]][key][inner_key] \
+                    self._doc_buffer[doc[self._stream_id_key]][key][inner_key] \
                         .append(inner_value)
             else:
-                self._doc_buffer[doc[self._stream_id]][key] = value
+                self._doc_buffer[doc[self._stream_id_key]][key] = value
 
     def freeze(self):
         self._frozen = True
         self._mutex.acquire()
-        self._dump_block.notify()
+        self._not_empty.notify()
         self._mutex.release()
