@@ -79,11 +79,11 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def descriptor(self, doc):
-        self._insert_header('descriptor', doc)
+        self._insert_header('descriptors', doc)
         return doc
 
     def resource(self, doc):
-        self._insert_header('resource', doc)
+        self._insert_header('resources', doc)
         return doc
 
     def event(self,doc):
@@ -106,12 +106,10 @@ class Serializer(event_model.DocumentRouter):
         self._freeze()
 
     def _freeze(self):
-        print("Freeze")
         self._frozen = True
         self._event_buffer.freeze()
         self._datum_buffer.freeze()
         self._executor.shutdown(wait=True)
-        print("shutdown")
 
         if self._event_buffer._current_size > 0:
             self._event_worker()
@@ -123,7 +121,7 @@ class Serializer(event_model.DocumentRouter):
         permanent_run = self._get_run(self._permanent_db, self._run_uid)
 
         if  volatile_run != permanent_run:
-            raise RuntimeError("Failed to move data to permanent database.")
+            raise IOError("Failed to move data to permanent database.")
         else:
             self._volatile_db.header.drop()
             self._volatile_db.events.drop()
@@ -131,19 +129,30 @@ class Serializer(event_model.DocumentRouter):
 
     def _get_run(self, db, run_uid):
         run = list()
-        header = db.header.find_one({'uid': run_uid})
+        header = db.header.find_one({'run_id': run_uid}, {'_id' : False})
+
+        if header == None:
+            raise RuntimeError(f"Run not found {run_uid}")
+
         run.append(('header',header))
-        for descriptor in header['descriptors']:
-            run += [('event',doc) for doc in
-                        db.events.find_many({'descriptor': descriptor})]
-        for resource in header['resources']:
-            run += [('datum', doc) for doc in
-                        db.datum.find_many({'resource': resource})]
+
+        if 'descriptors' in header.keys():
+            for descriptor in header['descriptors']:
+                run += [('event',doc) for doc in
+                        db.events.find({'descriptor': descriptor}, \
+                                        {'_id':False})]
+
+        if 'resources' in header.keys():
+            for resource in header['resources']:
+                run += [('datum', doc) for doc in
+                        db.datum.find({'resource': resource}, {'_id':False})]
+
         return run
 
     def _insert_run(self, db, run):
         for collection, doc in run:
             result = db[collection].insert_one(doc)
+            del doc['_id']
 
     def _insert_header(self, name,  doc):
         self._volatile_db.header.update_one(
@@ -242,7 +251,8 @@ class DocBuffer():
     def __init__(self, doc_type, max_size):
         self._max_size = max_size
         self._current_size = 0
-        self._doc_buffer = defaultdict(lambda: defaultdict(dict))
+        self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
+                                                    defaultdict(list)))
         self._mutex = threading.Lock()
         self._dump_block = threading.Condition(self._mutex)
         self._insert_block = threading.Condition(self._mutex)
@@ -256,6 +266,7 @@ class DocBuffer():
             self._array_keys = set(["datum_id"])
             self._dataframe_keys = set(["datum_kwargs"])
             self._stream_id = "resource"
+
 
     def insert(self, doc):
         #pdb.set_trace()
@@ -277,7 +288,8 @@ class DocBuffer():
         self._mutex.acquire()
         try:
             event_buffer_dump = self._doc_buffer
-            self.doc_buffer = defaultdict(lambda: defaultdict(dict))
+            self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
+                                                        defaultdict(list)))
             self._current_size = 0
             self._insert_block.notify()
         finally:
@@ -287,13 +299,15 @@ class DocBuffer():
     def _buffer_insert(self, doc):
         for key, value in doc.items():
             if key in self._array_keys:
-                self._doc_buffer[doc[self._stream_id][key]].append(value)
+                self._doc_buffer[doc[self._stream_id]][key] = list(
+                    self._doc_buffer[doc[self._stream_id]][key])
+                self._doc_buffer[doc[self._stream_id]][key].append(value)
             elif key in self._dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    self._doc_buffer[doc[self._stream_id][key][inner_key]] \
+                    self._doc_buffer[doc[self._stream_id]][key][inner_key] \
                         .append(inner_value)
             else:
-                self._doc_buffer[doc[self._stream_id][key]] = value
+                self._doc_buffer[doc[self._stream_id]][key] = value
 
     def freeze(self):
         self._frozen = True
