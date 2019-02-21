@@ -53,13 +53,11 @@ class Serializer(event_model.DocumentRouter):
         while not self._frozen:
             event_dump = self._event_buffer.dump()
             self._bulkwrite_event(event_dump)
-        print("event worker closed")
 
     def _datum_worker(self):
         while not self._frozen:
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
-        print("datum worker closed")
 
     def start(self, doc):
         self._check_start(doc)
@@ -100,15 +98,10 @@ class Serializer(event_model.DocumentRouter):
         self._freeze()
 
     def _freeze(self):
-        print("frozen")
         self._frozen = True
         self._event_buffer.freeze()
         self._datum_buffer.freeze()
         self._executor.shutdown(wait=True)
-
-        print("event buffer size: ", self._event_buffer._current_size)
-        print("datum buffer size: ", self._datum_buffer._current_size)
-        print("event buffer", self._event_buffer._doc_buffer)
 
         if self._event_buffer._current_size > 0:
             event_dump = self._event_buffer.dump()
@@ -116,12 +109,6 @@ class Serializer(event_model.DocumentRouter):
         if self._datum_buffer._current_size > 0:
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
-
-        print("event buffer size: ", self._event_buffer._current_size)
-        print("datum buffer size: ", self._datum_buffer._current_size)
-        print("event buffer", self._event_buffer._doc_buffer)
-
-        pdb.set_trace()
 
         volatile_run = self._get_run(self._volatile_db, self._run_uid)
         self._insert_run(self._permanent_db, volatile_run)
