@@ -2,7 +2,7 @@
 # binary files should be included in the repository.
 
 
-from suitcase.mongo_layout1 import Serializer
+from suitcase.mongo_normalized import Serializer
 
 
 def test_export(db_factory, example_data):
