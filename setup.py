@@ -37,8 +37,8 @@ setup(
     version=versioneer.get_version(),
     cmdclass=versioneer.get_cmdclass(),
     long_description=readme,
-    packages=['suitcase.mongo_layout1', 'suitcase.mongo_layout1.tests',
-              'suitcase.mongo_layout2',  # TODO Add tests package when it exists.
+    packages=['suitcase.mongo_normalized', 'suitcase.mongo_normalized.tests',
+              'suitcase.mongo_embedded',  # TODO Add tests package when it exists.
               ],
     entry_points={
         'console_scripts': [
@@ -47,7 +47,7 @@ setup(
         },
     include_package_data=True,
     package_data={
-        'suitcase.mongo_layout1': [
+        'suitcase.mongo_normalized': [
             # When adding files here, remember to update MANIFEST.in as well,
             # or else they will not be included in the distribution on PyPI!
             # 'path/to/data_file',
