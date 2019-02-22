@@ -221,10 +221,12 @@ class DocBuffer():
     documents into a single document, where the values of matching keys are
     stored as a list, or dictionary of lists.
 
-    DocBuffer has two public methods, insert, and dump. Insert, embedes an
-    event or datum document in the buffer and blocks if the buffer is full.
-    Dump returns a reference to the buffer and creates a new buffer for new
+    DocBuffer has three public methods, insert, dump, and freeze.
+    - insert, embedes an event or datum document in the buffer and blocks if
+    the buffer is full.
+    - dump returns a reference to the buffer and creates a new buffer for new
     inserts. Dump blocks if the buffer is empty.
+    - freeze, blocks new inserts, and stops dump from blocking.
 
     Events with different descriptors, or datum with different resources are
     stored in separate embedded documents in the buffer. The buffer uses a
@@ -234,10 +236,13 @@ class DocBuffer():
 
     The doc_type argument which can be either 'event' or 'datum'.
     The the details of the embedding differ for event and datum documents.
+
+    Parameters
+    ----------
+    doc_type:
     """
 
-    def __init__(self, doc_type, max_size):
-        self._max_size = max_size
+    def __init__(self, doc_type, buffer_size):
         self._current_size = 0
         self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
                                                     defaultdict(list)))
@@ -246,6 +251,12 @@ class DocBuffer():
         self._not_empty = threading.Condition(self._mutex)
         self._frozen = False
 
+        if (buffer_size >= 1000000) and (buffer_size <= 15000000):
+            self._buffer_size = buffer_size
+        else:
+            raise AttributeError(f"Invalid buffer_size {buffer_size}, "
+                                   "buffer_size must be between 1000000 and "
+                                   "15000000 inclusive.")
         if doc_type == "event":
             self._array_keys = set(["seq_num","time","uid"])
             self._dataframe_keys = set(["data","timestamps","filled"])
@@ -254,17 +265,22 @@ class DocBuffer():
             self._array_keys = set(["datum_id"])
             self._dataframe_keys = set(["datum_kwargs"])
             self._stream_id_key = "resource"
-
+        else:
+            raise AttributeError(f"Invalid doc_type {doc_type}, doc_type must "
+                                    "be either 'event' or 'datum'")
 
     def insert(self, doc):
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
                                "frozen DocBuffer")
+
+        doc_size = sys.getsizeof(doc)
+
         with self._not_full:
             self._not_full.wait_for(lambda :
-                                    self._current_size < self._max_size)
+                            self._current_size + doc_size < self._buffer_size)
             self._buffer_insert(doc)
-            self._current_size += sys.getsizeof(doc)
+            self._current_size += doc_size
             self._not_empty.notify_all()
 
     def dump(self):
