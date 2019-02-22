@@ -8,7 +8,7 @@ from mongobox import MongoBox
 from ophyd.sim import det, motor
 
 #from event_model import NumpyEncoder
-from __init__ import Serializer
+from suitcase.mongo_embedded import Serializer
 
 volatile_box = MongoBox()
 permanent_box = MongoBox()
@@ -23,4 +23,4 @@ serializer = Serializer(volatile_db, permanent_db)
 
 RE = RunEngine({})
 RE.subscribe(serializer)
-RE(scan([det], motor, 1, 10, 10))
+RE(scan([det], motor, 1, 10, 1000))

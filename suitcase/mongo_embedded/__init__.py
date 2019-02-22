@@ -1,7 +1,6 @@
 import event_model
 from pathlib import Path
-#from ._version import get_versions
-#from mongobox import MongoBox
+from ._version import get_versions
 from collections import defaultdict
 from pymongo import MongoClient
 from concurrent.futures import ThreadPoolExecutor
@@ -11,9 +10,9 @@ import threading
 import sys
 from time import sleep
 import json
-import pdb
-#__version__ = get_versions()['version']
-#del get_versions
+
+__version__ = get_versions()['version']
+del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
@@ -45,8 +44,7 @@ class Serializer(event_model.DocumentRouter):
         self._executor.submit(self._datum_worker)
 
     def __call__(self, name, doc):
-        sanitized_doc = doc.copy()
-        event_model.sanitize_doc(sanitized_doc)
+        sanitized_doc = event_model.sanitize_doc(doc)
         return super().__call__(name, sanitized_doc)
 
     def _event_worker(self):
@@ -118,7 +116,7 @@ class Serializer(event_model.DocumentRouter):
             raise IOError("Failed to move data to permanent database.")
         else:
             self._volatile_db.header.drop()
-            self._volatile_db.events.drop()
+            self._volatile_db.event.drop()
             self._volatile_db.datum.drop()
 
     def _get_run(self, db, run_uid):
@@ -132,7 +130,7 @@ class Serializer(event_model.DocumentRouter):
         if 'descriptors' in header.keys():
             for descriptor in header['descriptors']:
                 run += [('event',doc) for doc in
-                        db.events.find({'descriptor': descriptor['uid']}, \
+                        db.event.find({'descriptor': descriptor['uid']}, \
                                         {'_id':False})]
         if 'resources' in header.keys():
             for resource in header['resources']:
@@ -144,6 +142,7 @@ class Serializer(event_model.DocumentRouter):
     def _insert_run(self, db, run):
         for collection, doc in run:
             result = db[collection].insert_one(doc)
+            # del doc['_id'] is needed because insert_one mutates doc.
             del doc['_id']
 
     def _insert_header(self, name,  doc):
@@ -154,12 +153,12 @@ class Serializer(event_model.DocumentRouter):
     def _bulkwrite_datum(self, datum_buffer):
         operations = [self._updateone_datumpage(resource, datum_page)
                         for resource, datum_page in datum_buffer.items()]
-        self._volatile_db.bulk_write(operations, ordered=False)
+        self._volatile_db.datum.bulk_write(operations, ordered=False)
 
     def _bulkwrite_event(self, event_buffer):
         operations = [self._updateone_eventpage(descriptor, eventpage) \
                         for descriptor, eventpage in event_buffer.items()]
-        self._volatile_db.events.bulk_write(operations, ordered=False)
+        self._volatile_db.event.bulk_write(operations, ordered=False)
 
     def _updateone_eventpage(self, descriptor, event_page):
         event_size = sys.getsizeof(event_page)

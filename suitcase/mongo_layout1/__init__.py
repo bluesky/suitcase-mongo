@@ -1,5 +1,4 @@
 import event_model
-from pathlib import Path
 import pymongo
 from ._version import get_versions
 
@@ -9,40 +8,25 @@ del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
-    def __init__(self, metadatastore_uri, asset_registry_uri):
+    def __init__(self, metadatastore_db, asset_registry_db):
         """
         Insert documents into MongoDB using layout v1.
 
         This layout uses a separate Mongo collection per document type and a
         separate Mongo document for each logical document.
-        
+
         Note that this Seralizer does not share the standard Serializer
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
         """
-        self._metadatastore_client = pymongo.MongoClient(metadatastore_uri)
-        self._asset_registry_client = pymongo.MongoClient(asset_registry_uri)
-        # Stash URIs just for use in __repr__.
-        self._metadatastore_uri = metadatastore_uri
-        self._asset_registry_uri = asset_registry_uri
-
-        try:
-            # Called with no args, get_database() returns the database
-            # specified in the uri --- or raises if there was none. There is no
-            # public method for checking this in advance, so we just catch the
-            # error.
-            mds_db = self._metadatastore_client.get_database()
-        except pymongo.errors.ConfigurationError as err:
-            raise ValueError(
-                f"Invalid metadatastore_uri: {metadatastore_uri} "
-                f"Did you forget to include a database?") from err
-        try:
-            assets_db = self._asset_registry_client.get_database()
-        except pymongo.errors.ConfigurationError as err:
-            raise ValueError(
-                f"Invalid asset_registry_uri: {asset_registry_uri} "
-                f"Did you forget to include a database?") from err
-
+        if isinstance(metadatastore_db, str):
+            mds_db = _get_database(metadatastore_db)
+        else:
+            mds_db = metadatastore_db
+        if isinstance(asset_registry_db, str):
+            assets_db = _get_database(asset_registry_db)
+        else:
+            assets_db = asset_registry_db
         self._run_start_collection = mds_db.get_collection('run_start')
         self._run_stop_collection = mds_db.get_collection('run_stop')
         self._event_descriptor_collection = mds_db.get_collection('event_descriptor')
@@ -50,6 +34,9 @@ class Serializer(event_model.DocumentRouter):
 
         self._resource_collection = assets_db.get_collection('resource')
         self._datum_collection = assets_db.get_collection('datum')
+
+        self._metadatastore_db = mds_db
+        self._asset_registry_db = assets_db
 
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
@@ -100,5 +87,19 @@ class Serializer(event_model.DocumentRouter):
     def __repr__(self):
         # Display connection info in eval-able repr.
         return (f'{type(self).__name__}('
-                f'metadatastore_uri={self._metadatastore_uri}, '
-                f'asset_registry_uri={self._asset_registry_uri})')
+                f'metadatastore_db={self._metadatastore_db!r}, '
+                f'asset_registry_db={self._asset_registry_db!r})')
+
+
+def _get_database(uri):
+    client = pymongo.MongoClient(uri)
+    try:
+        # Called with no args, get_database() returns the database
+        # specified in the client's uri --- or raises if there was none.
+        # There is no public method for checking this in advance, so we
+        # just catch the error.
+        return client.get_database()
+    except pymongo.errors.ConfigurationError as err:
+        raise ValueError(
+            f"Invalid client: {client} "
+            f"Did you forget to include a database?") from err
