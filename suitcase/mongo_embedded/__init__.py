@@ -220,13 +220,6 @@ class DocBuffer():
     documents into a single document, where the values of matching keys are
     stored as a list, or dictionary of lists.
 
-    DocBuffer has three public methods, insert, dump, and freeze.
-    - insert, embedes an event or datum document in the buffer and blocks if
-    the buffer is full.
-    - dump returns a reference to the buffer and creates a new buffer for new
-    inserts. Dump blocks if the buffer is empty.
-    - freeze, blocks new inserts, and stops dump from blocking.
-
     Events with different descriptors, or datum with different resources are
     stored in separate embedded documents in the buffer. The buffer uses a
     defaultdict so new embedded documents are automatically created when they
@@ -235,6 +228,10 @@ class DocBuffer():
 
     The doc_type argument which can be either 'event' or 'datum'.
     The the details of the embedding differ for event and datum documents.
+
+    Internally the buffer is a dictionary that maps event decriptors to
+    event_pages and datum resources to datum_pages. event_pages and datum_pages
+    are defined by the bluesky event-model.
 
     Parameters
     ----------
@@ -315,9 +312,7 @@ class DocBuffer():
         -------
         doc_buffer_dump: dict
             A dictionary that maps event descriptor to event_page, or a
-            dictionary that maps datum resource to datum_page. event_page and
-            datum_page are defined my the bluesky event model.
-
+            dictionary that maps datum resource to datum_page.
         """
 
         # Block if the buffer is empty.
