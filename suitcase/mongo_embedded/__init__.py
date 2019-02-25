@@ -1,19 +1,14 @@
 import event_model
-from pathlib import Path
-#from ._version import get_versions
-#from mongobox import MongoBox
+from ._version import get_versions
 from collections import defaultdict
-from pymongo import MongoClient
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
-from pymongo.errors import BulkWriteError
+# from pymongo.errors import BulkWriteError
 import threading
 import sys
-from time import sleep
-import json
-import pdb
-#__version__ = get_versions()['version']
-#del get_versions
+
+__version__ = get_versions()['version']
+del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
@@ -21,7 +16,7 @@ class Serializer(event_model.DocumentRouter):
     # How do we integrate with the run engine?
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
-                   buffer_size=5000000, **kwargs):
+                 buffer_size=5000000, **kwargs):
         """
         Insert documents into MongoDB using layout v2.
 
@@ -29,12 +24,12 @@ class Serializer(event_model.DocumentRouter):
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
         """
-        self._MAX_DOC_SIZE = buffer_size #size is in bytes
+        self._MAX_DOC_SIZE = buffer_size  # Size is in bytes
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
         self._event_buffer = DocBuffer('event', self._MAX_DOC_SIZE)
         self._datum_buffer = DocBuffer('datum', self._MAX_DOC_SIZE)
-        #kwargs.setdefault('cls', NumpyEncoder)
+        # kwargs.setdefault('cls', NumpyEncoder)
         self._kwargs = kwargs
         self._start_found = False
         self._run_uid = None
@@ -78,20 +73,20 @@ class Serializer(event_model.DocumentRouter):
         self._insert_header('resources', doc)
         return doc
 
-    def event(self,doc):
+    def event(self, doc):
         self._event_buffer.insert(doc)
         return doc
 
-    def datum(self,doc):
+    def datum(self, doc):
         self._datum_buffer.insert(doc)
         return doc
 
     def event_page(self, doc):
-        self._bulkwrite_event({doc['descriptor']:doc})
+        self._bulkwrite_event({doc['descriptor']: doc})
         return doc
 
     def datum_page(self, doc):
-        self._bulkwrite_datum({doc['resource']:doc})
+        self._bulkwrite_datum({doc['resource']: doc})
         return doc
 
     def close(self):
@@ -114,7 +109,7 @@ class Serializer(event_model.DocumentRouter):
         self._insert_run(self._permanent_db, volatile_run)
         permanent_run = self._get_run(self._permanent_db, self._run_uid)
 
-        if  volatile_run != permanent_run:
+        if volatile_run != permanent_run:
             raise IOError("Failed to move data to permanent database.")
         else:
             self._volatile_db.header.drop()
@@ -123,78 +118,82 @@ class Serializer(event_model.DocumentRouter):
 
     def _get_run(self, db, run_uid):
         run = list()
-        header = db.header.find_one({'run_id': run_uid}, {'_id' : False})
-        if header == None:
+        header = db.header.find_one({'run_id': run_uid}, {'_id': False})
+        if header is None:
             raise RuntimeError(f"Run not found {run_uid}")
 
-        run.append(('header',header))
+        run.append(('header', header))
 
         if 'descriptors' in header.keys():
             for descriptor in header['descriptors']:
-                run += [('event',doc) for doc in
-                        db.events.find({'descriptor': descriptor['uid']}, \
-                                        {'_id':False})]
+                run += [('event', doc) for doc in
+                        db.event.find({'descriptor': descriptor['uid']},
+                                      {'_id': False})]
+
         if 'resources' in header.keys():
             for resource in header['resources']:
                 run += [('datum', doc) for doc in
-                        db.datum.find({'resource': resource['uid']}, \
-                                        {'_id':False})]
+                        db.datum.find({'resource': resource['uid']},
+                                      {'_id': False})]
         return run
 
     def _insert_run(self, db, run):
         for collection, doc in run:
-            result = db[collection].insert_one(doc)
+            db[collection].insert_one(doc)
+            # del doc['_id'] is needed because insert_one mutates doc.
             del doc['_id']
 
     def _insert_header(self, name,  doc):
-        self._volatile_db.header.update_one(
-                        {'run_id': self._run_uid}, {'$push':
-                        {name: doc}}, upsert=True)
+        self._volatile_db.header.update_one({'run_id': self._run_uid},
+                                            {'$push': {name: doc}},
+                                            upsert=True)
 
     def _bulkwrite_datum(self, datum_buffer):
         operations = [self._updateone_datumpage(resource, datum_page)
-                        for resource, datum_page in datum_buffer.items()]
-        self._volatile_db.bulk_write(operations, ordered=False)
+                      for resource, datum_page in datum_buffer.items()]
+        self._volatile_db.datum.bulk_write(operations, ordered=False)
 
     def _bulkwrite_event(self, event_buffer):
-        operations = [self._updateone_eventpage(descriptor, eventpage) \
-                        for descriptor, eventpage in event_buffer.items()]
-        self._volatile_db.events.bulk_write(operations, ordered=False)
+        operations = [self._updateone_eventpage(descriptor, eventpage)
+                      for descriptor, eventpage in event_buffer.items()]
+        self._volatile_db.event.bulk_write(operations, ordered=False)
 
     def _updateone_eventpage(self, descriptor, event_page):
         event_size = sys.getsizeof(event_page)
 
-        data_string = {'data.' + key : {'$each' : value_array}
-                for key, value_array in event_page['data'].items()}
+        data_string = {'data.' + key: {'$each': value_array}
+                       for key, value_array in event_page['data'].items()}
 
-        timestamp_string =  {'timestamps.' + key : {'$each' : value_array}
-                for key, value_array in event_page['timestamps'].items()}
+        timestamp_string = {'timestamps.' + key: {'$each': value_array}
+                            for key, value_array
+                            in event_page['timestamps'].items()}
 
-        filled_string = {'filled.' + key : {'$each' : value_array}
-                for key, value_array in event_page['filled'].items()}
+        filled_string = {'filled.' + key: {'$each': value_array}
+                         for key, value_array in event_page['filled'].items()}
 
         update_string = {**data_string, **timestamp_string, **filled_string}
 
         return UpdateOne(
-            {'descriptor': descriptor,'size': {'$lt': self._MAX_DOC_SIZE}},
-            {'$push': {'uid': {'$each' : event_page['uid']},
-                          'time': {'$each' : event_page['time']},
-                          'seq_num': {'$each' : event_page['seq_num']},
-                          **update_string},
-            '$inc': {'size':event_size}},
+            {'descriptor': descriptor, 'size': {'$lt': self._MAX_DOC_SIZE}},
+            {'$push': {'uid': {'$each': event_page['uid']},
+                       'time': {'$each': event_page['time']},
+                       'seq_num': {'$each': event_page['seq_num']},
+                       **update_string},
+             '$inc': {'size': event_size}},
             upsert=True)
 
     def _updateone_datumpage(self, resource, datum_page):
         datum_size = sys.getsizeof(datum_page)
 
-        kwargs_string = {'datum_kwargs.' + key : {'$each' : value_array}
-                for key, value_array in datum_page['datum_kwargs'].items()}
+        kwargs_string = {'datum_kwargs.' + key: {'$each': value_array}
+                         for key, value_array
+                         in datum_page['datum_kwargs'].items()}
 
         return UpdateOne(
-            {'resource': resource,'size': {'$lt': self._MAX_DOC_SIZE}},
-            {'$pushall': {'datum_id': {'$each' : datum_page['uid']},
+            {'resource': resource, 'size': {'$lt': self._MAX_DOC_SIZE}},
+            {'$pushall': {'datum_id': {'$each': datum_page['uid']},
                           **kwargs_string},
-            '$inc': {'size': datum_size}},
+             '$inc': {'size': datum_size}},
             upsert=True)
 
     def _check_start(self, doc):
@@ -208,7 +207,7 @@ class Serializer(event_model.DocumentRouter):
 
     def __repr__(self):
         # Display connection info in eval-able repr.
-        return "temp repr" #f'{type(self).__name__}(run_uid={self._run_uid})'
+        return "temp repr"  # f'{type(self).__name__}(run_uid={self._run_uid})'
 
 
 class DocBuffer():
@@ -245,7 +244,7 @@ class DocBuffer():
     def __init__(self, doc_type, buffer_size):
         self._current_size = 0
         self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
-                                                    defaultdict(list)))
+                                                           defaultdict(list)))
         self._mutex = threading.Lock()
         self._not_full = threading.Condition(self._mutex)
         self._not_empty = threading.Condition(self._mutex)
@@ -255,11 +254,11 @@ class DocBuffer():
             self._buffer_size = buffer_size
         else:
             raise AttributeError(f"Invalid buffer_size {buffer_size}, "
-                                   "buffer_size must be between 1000000 and "
-                                   "15000000 inclusive.")
+                                 "buffer_size must be between 1000000 and "
+                                 "15000000 inclusive.")
         if doc_type == "event":
-            self._array_keys = set(["seq_num","time","uid"])
-            self._dataframe_keys = set(["data","timestamps","filled"])
+            self._array_keys = set(["seq_num", "time", "uid"])
+            self._dataframe_keys = set(["data", "timestamps", "filled"])
             self._stream_id_key = "descriptor"
         elif doc_type == "datum":
             self._array_keys = set(["datum_id"])
@@ -267,7 +266,7 @@ class DocBuffer():
             self._stream_id_key = "resource"
         else:
             raise AttributeError(f"Invalid doc_type {doc_type}, doc_type must "
-                                    "be either 'event' or 'datum'")
+                                 "be either 'event' or 'datum'")
 
     def insert(self, doc):
         if self._frozen:
@@ -277,8 +276,8 @@ class DocBuffer():
         doc_size = sys.getsizeof(doc)
 
         with self._not_full:
-            self._not_full.wait_for(lambda :
-                            self._current_size + doc_size < self._buffer_size)
+            self._not_full.wait_for(lambda: self._current_size + doc_size
+                                    < self._buffer_size)
             self._buffer_insert(doc)
             self._current_size += doc_size
             self._not_empty.notify_all()
@@ -288,8 +287,9 @@ class DocBuffer():
             self._not_empty.wait_for(lambda: (
                                 self._current_size or self._frozen))
             event_buffer_dump = self._doc_buffer
-            self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
-                                                        defaultdict(list)))
+            self._doc_buffer = defaultdict(lambda:
+                                           defaultdict(lambda:
+                                                       defaultdict(list)))
             self._current_size = 0
             self._not_full.notify_all()
             return event_buffer_dump
@@ -302,8 +302,8 @@ class DocBuffer():
                 self._doc_buffer[doc[self._stream_id_key]][key].append(value)
             elif key in self._dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    self._doc_buffer[doc[self._stream_id_key]][key][inner_key] \
-                        .append(inner_value)
+                    (self._doc_buffer[doc[self._stream_id_key]][key]
+                        [inner_key].append(inner_value))
             else:
                 self._doc_buffer[doc[self._stream_id_key]][key] = value
 
