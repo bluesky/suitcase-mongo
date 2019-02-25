@@ -98,10 +98,10 @@ class Serializer(event_model.DocumentRouter):
         self._datum_buffer.freeze()
         self._executor.shutdown(wait=True)
 
-        if self._event_buffer._current_size > 0:
+        if self._event_buffer.current_size > 0:
             event_dump = self._event_buffer.dump()
             self._bulkwrite_event(event_dump)
-        if self._datum_buffer._current_size > 0:
+        if self._datum_buffer.current_size > 0:
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
 
@@ -238,17 +238,27 @@ class DocBuffer():
 
     Parameters
     ----------
-    doc_type:
+    doc_type: str
+        {'event', 'datum'}
+    buffer_size: int, optional
+        Maximum buffer size in bytes.
+
+    Attributes
+    ----------
+    current_size: int
+        Current size of the buffer.
+
     """
 
     def __init__(self, doc_type, buffer_size):
-        self._current_size = 0
-        self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
-                                                           defaultdict(list)))
+        self.current_size = 0
+        self._frozen = False
         self._mutex = threading.Lock()
         self._not_full = threading.Condition(self._mutex)
         self._not_empty = threading.Condition(self._mutex)
-        self._frozen = False
+
+        self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
+                                                           defaultdict(list)))
 
         if (buffer_size >= 1000000) and (buffer_size <= 15000000):
             self._buffer_size = buffer_size
@@ -256,6 +266,9 @@ class DocBuffer():
             raise AttributeError(f"Invalid buffer_size {buffer_size}, "
                                  "buffer_size must be between 1000000 and "
                                  "15000000 inclusive.")
+
+        # Event docs and datum docs are embedded differently, this configures
+        # the buffer for the specified document type.
         if doc_type == "event":
             self._array_keys = set(["seq_num", "time", "uid"])
             self._dataframe_keys = set(["data", "timestamps", "filled"])
@@ -269,30 +282,59 @@ class DocBuffer():
                                  "be either 'event' or 'datum'")
 
     def insert(self, doc):
+        """
+        Inserts a bluesky event or datum document into buffer. This method
+        blocks if the buffer is full.
+
+        Parameters
+        ----------
+        doc: json
+            A validated bluesky event or datum document.
+        """
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
                                "frozen DocBuffer")
 
         doc_size = sys.getsizeof(doc)
 
+        # Block if buffer is full.
         with self._not_full:
-            self._not_full.wait_for(lambda: self._current_size + doc_size
+            self._not_full.wait_for(lambda: self.current_size + doc_size
                                     < self._buffer_size)
             self._buffer_insert(doc)
-            self._current_size += doc_size
+            self.current_size += doc_size
+            # Wakes up threads that are waiting to dump.
             self._not_empty.notify_all()
 
     def dump(self):
+        """
+        Get everything in the buffer and clear the buffer.  This method blocks
+        if the buffer is empty.
+
+        Returns
+        -------
+        doc_buffer_dump: dict
+            A dictionary that maps event descriptor to event_page, or a
+            dictionary that maps datum resource to datum_page. event_page and
+            datum_page are defined my the bluesky event model.
+
+        """
+
+        # Block if the buffer is empty.
+        # Don't block if the buffer is frozen, this allows all workers threads
+        # finish when freezing the run.
         with self._not_empty:
             self._not_empty.wait_for(lambda: (
-                                self._current_size or self._frozen))
-            event_buffer_dump = self._doc_buffer
+                                self.current_size or self._frozen))
+            # Get a reference to the current buffer, create a new buffer.
+            doc_buffer_dump = self._doc_buffer
             self._doc_buffer = defaultdict(lambda:
                                            defaultdict(lambda:
                                                        defaultdict(list)))
-            self._current_size = 0
+            self.current_size = 0
+            # Wakes up all threads that are waiting to insert.
             self._not_full.notify_all()
-            return event_buffer_dump
+            return doc_buffer_dump
 
     def _buffer_insert(self, doc):
         for key, value in doc.items():
