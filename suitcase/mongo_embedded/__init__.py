@@ -67,7 +67,8 @@ class Serializer(event_model.DocumentRouter):
     """
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
-                 buffer_size=5000000, **kwargs):
+                 buffer_size=1000000, page_size=5000000, **kwargs):
+
         """
         Insert documents into MongoDB using an embedded data model.
 
@@ -81,13 +82,25 @@ class Serializer(event_model.DocumentRouter):
             number of workers that read from the buffer and write to the
             database. Default is 1.
         buffer_size: int, optional
-            maximum size of the buffers in bytes. Default is 5000000
+            maximum size of the buffers in bytes. buffer_size + page_size must
+            be less than 15000000. Default is 5000000
+        page_size: int, optional
+            The document size for event_page and datum_page documents. The
+            maximum event/datum_page size is buffer_size + page_size.
+            buffer_size + page_size must be less than 15000000.The
+            default is 5000000.
         """
-        self._MAX_DOC_SIZE = buffer_size
+
+        if buffer_size + page_size > 15000000:
+            raise AttributeError(f"buffer_size: {buffer_size} + page_size: "
+                                 "page_size} is greater then 15000000.")
+
+        self._BUFFER_SIZE = buffer_size
+        self._PAGE_SIZE = page_size
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
-        self._event_buffer = DocBuffer('event', self._MAX_DOC_SIZE)
-        self._datum_buffer = DocBuffer('datum', self._MAX_DOC_SIZE)
+        self._event_buffer = DocBuffer('event', self._BUFFER_SIZE)
+        self._datum_buffer = DocBuffer('datum', self._BUFFER_SIZE)
         # kwargs.setdefault('cls', NumpyEncoder)
         self._kwargs = kwargs
         self._start_found = False
@@ -153,12 +166,13 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def close(self):
-        self._freeze()
+        self.freeze(self._run_uid)
 
-    def _freeze(self):
+    def freeze(self, run_uid):
         """
         Freeze the run by flushing the buffers and moving all of the run's
-        documents to the permanent database.
+        documents to the permanent database. Can be used independantly to
+        freeze a previous run.
         """
         # Freeze the serializer.
         self._frozen = True
@@ -183,9 +197,9 @@ class Serializer(event_model.DocumentRouter):
         assert self._datum_buffer.current_size == 0
 
         # Copy the run to the permanent database.
-        volatile_run = self._get_run(self._volatile_db, self._run_uid)
+        volatile_run = self._get_run(self._volatile_db, run_uid)
         self._insert_run(self._permanent_db, volatile_run)
-        permanent_run = self._get_run(self._permanent_db, self._run_uid)
+        permanent_run = self._get_run(self._permanent_db, run_uid)
 
         # Check that it has been copied correctly to permanent database, then
         # delete the run from the volatile database.
@@ -276,7 +290,7 @@ class Serializer(event_model.DocumentRouter):
         update_string = {**data_string, **timestamp_string, **filled_string}
 
         return UpdateOne(
-            {'descriptor': descriptor, 'size': {'$lt': self._MAX_DOC_SIZE}},
+            {'descriptor': descriptor, 'size': {'$lt': self._PAGE_SIZE}},
             {'$push': {'uid': {'$each': event_page['uid']},
                        'time': {'$each': event_page['time']},
                        'seq_num': {'$each': event_page['seq_num']},

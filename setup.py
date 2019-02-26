@@ -38,7 +38,7 @@ setup(
     cmdclass=versioneer.get_cmdclass(),
     long_description=readme,
     packages=['suitcase.mongo_normalized', 'suitcase.mongo_normalized.tests',
-              'suitcase.mongo_embedded',  # TODO Add tests package when it exists.
+              'suitcase.mongo_embedded',  # TODO Add tests package.
               ],
     entry_points={
         'console_scripts': [
