@@ -80,7 +80,7 @@ class Serializer(event_model.DocumentRouter):
             database for permanent storage
         num_theads: int, optional
             number of workers that read from the buffer and write to the
-            database. Default is 1.
+            database. Must be 5 or less. Default is 1.
         buffer_size: int, optional
             maximum size of the buffers in bytes. buffer_size + page_size must
             be less than 15000000. Default is 5000000
@@ -90,6 +90,13 @@ class Serializer(event_model.DocumentRouter):
             buffer_size + page_size must be less than 15000000.The
             default is 5000000.
         """
+
+        if num_threads > 10 or num_threads < 1:
+            raise AttributeError(f"num_threads must be between 1 and 5 "
+                                 "inclusive.")
+
+        if page_size < 10000:
+            raise AttributeError(f"page_size must be >= 10000")
 
         if buffer_size + page_size > 15000000:
             raise AttributeError(f"buffer_size: {buffer_size} + page_size: "
@@ -377,11 +384,11 @@ class DocBuffer():
         self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
                                                            defaultdict(list)))
 
-        if (buffer_size >= 1000000) and (buffer_size <= 15000000):
+        if (buffer_size >= 1000) and (buffer_size <= 15000000):
             self._buffer_size = buffer_size
         else:
             raise AttributeError(f"Invalid buffer_size {buffer_size}, "
-                                 "buffer_size must be between 1000000 and "
+                                 "buffer_size must be between 1000 and "
                                  "15000000 inclusive.")
 
         # Event docs and datum docs are embedded differently, this configures
