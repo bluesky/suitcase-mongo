@@ -3,7 +3,6 @@ from ._version import get_versions
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
-# from pymongo.errors import BulkWriteError
 import threading
 import sys
 
@@ -12,19 +11,79 @@ del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
-    # how to prevent the same run from being frozen two times?
-    # How do we integrate with the run engine?
+    """
+    Insert bluesky documents into MongoDB using an embedded data model.
+
+    This embedded data model has three collections: header, event,
+    datum. The header collection includes start, stop, descriptor,
+    and resource documents. The event_pages are stored in the event colleciton,
+    and datum_pages are stored in the datum collection.
+
+    To ensure data integrity two databases are required. A volatile database
+    that allows the update of existing documents. And a permanent database that
+    does not allow updates to documents. When the stop document is received
+    from the RunEngine the volatile data is "frozen" by moving it to the
+    permanent database.
+
+    This Serializer ensures that when the stop document or close request is
+    received all documents we be written to the volatile database. After
+    everything has been successfully writen to volatile database, it will copy
+    all of the runs documents to the permanent database, check that it has been
+    correctly copied, and then delete the volatile data.
+
+    This Serializer assumes that documents have been previously validated
+    according to the bluesky event-model.
+
+    Note that this Seralizer does not share the standard Serializer
+    name or signature common to suitcase packages because it can only write
+    via pymongo, not to an arbitrary user-provided buffer.
+
+    Examples
+    --------
+    >>> from bluesky import RunEngine
+    >>> from bluesky.plans import scan
+    >>> from mongobox import MongoBox
+    >>> from ophyd.sim import det, motor
+    >>> from suitcase.mongo_embedded import Serializer
+
+    >>> # Create two sandboxed mongo instances
+    >>> volatile_box = MongoBox()
+    >>> permanent_box = MongoBox()
+    >>> volatile_box.start()
+    >>> permanent_box.start()
+
+    >>> # Get references to the mongo databases
+    >>> volatile_db = volatile_box.client().db
+    >>> permanent_db = permanent_box.client().db
+
+    >>> # Create the Serializer
+    >>> serializer = Serializer(volatile_db, permanent_db)
+
+    >>> RE = RunEngine({})
+    >>> RE.subscribe(serializer)
+
+    >>> # Generate example data.
+    >>> RE(scan([det], motor, 1, 10, 10))
+    """
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
                  buffer_size=5000000, **kwargs):
         """
-        Insert documents into MongoDB using layout v2.
+        Insert documents into MongoDB using an embedded data model.
 
-        Note that this Seralizer does not share the standard Serializer
-        name or signature common to suitcase packages because it can only write
-        via pymongo, not to an arbitrary user-provided buffer.
+        Parameters
+        ----------
+        volatile_db: pymongo database
+            database for temporary storage
+        permanent_db: pymongo database
+            database for permanent storage
+        num_theads: int, optional
+            number of workers that read from the buffer and write to the
+            database. Default is 1.
+        buffer_size: int, optional
+            maximum size of the buffers in bytes. Default is 5000000
         """
-        self._MAX_DOC_SIZE = buffer_size  # Size is in bytes
+        self._MAX_DOC_SIZE = buffer_size
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
         self._event_buffer = DocBuffer('event', self._MAX_DOC_SIZE)
@@ -35,21 +94,25 @@ class Serializer(event_model.DocumentRouter):
         self._run_uid = None
         self._frozen = False
 
+        # Start workers.
         self._executor = ThreadPoolExecutor(max_workers=num_threads)
         self._executor.submit(self._event_worker)
         self._executor.submit(self._datum_worker)
 
     def __call__(self, name, doc):
-        sanitized_doc = doc.copy()
-        event_model.sanitize_doc(sanitized_doc)
+        # Before inserting into mongo, convert any numpy objects into built-in
+        # Python types compatible with pymongo.
+        sanitized_doc = event_model.sanitize_doc(doc)
         return super().__call__(name, sanitized_doc)
 
     def _event_worker(self):
+        # Gets the event buffer and writes it to the volatile database.
         while not self._frozen:
             event_dump = self._event_buffer.dump()
             self._bulkwrite_event(event_dump)
 
     def _datum_worker(self):
+        # Gets the datum buffer and writes it to the volatile database.
         while not self._frozen:
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
@@ -93,11 +156,21 @@ class Serializer(event_model.DocumentRouter):
         self._freeze()
 
     def _freeze(self):
+        """
+        Freeze the run by flushing the buffers and moving all of the run's
+        documents to the permanent database.
+        """
+        # Freeze the serializer.
         self._frozen = True
+
+        # Freeze the buffers.
         self._event_buffer.freeze()
         self._datum_buffer.freeze()
+
+        # Wait for the workers to finish.
         self._executor.shutdown(wait=True)
 
+        # Flush the buffers if there is anything in them.
         if self._event_buffer.current_size > 0:
             event_dump = self._event_buffer.dump()
             self._bulkwrite_event(event_dump)
@@ -105,10 +178,17 @@ class Serializer(event_model.DocumentRouter):
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
 
+        # Raise exception if buffers are not empty.
+        assert self._event_buffer.current_size == 0
+        assert self._datum_buffer.current_size == 0
+
+        # Copy the run to the permanent database.
         volatile_run = self._get_run(self._volatile_db, self._run_uid)
         self._insert_run(self._permanent_db, volatile_run)
         permanent_run = self._get_run(self._permanent_db, self._run_uid)
 
+        # Check that it has been copied correctly to permanent database, then
+        # delete the run from the volatile database.
         if volatile_run != permanent_run:
             raise IOError("Failed to move data to permanent database.")
         else:
@@ -117,19 +197,26 @@ class Serializer(event_model.DocumentRouter):
             self._volatile_db.datum.drop()
 
     def _get_run(self, db, run_uid):
+        """
+        Gets a run from a database. Returns a list of the run's documents.
+        """
         run = list()
+
+        # Get the header.
         header = db.header.find_one({'run_id': run_uid}, {'_id': False})
         if header is None:
             raise RuntimeError(f"Run not found {run_uid}")
 
         run.append(('header', header))
 
+        # Get the events.
         if 'descriptors' in header.keys():
             for descriptor in header['descriptors']:
                 run += [('event', doc) for doc in
                         db.event.find({'descriptor': descriptor['uid']},
                                       {'_id': False})]
 
+        # Get the datum.
         if 'resources' in header.keys():
             for resource in header['resources']:
                 run += [('datum', doc) for doc in
@@ -138,27 +225,42 @@ class Serializer(event_model.DocumentRouter):
         return run
 
     def _insert_run(self, db, run):
+        """
+        Inserts a run into a database. run is a list of the run's documents.
+        """
         for collection, doc in run:
             db[collection].insert_one(doc)
             # del doc['_id'] is needed because insert_one mutates doc.
             del doc['_id']
 
     def _insert_header(self, name,  doc):
+        """
+        Inserts header document into the run's header document.
+        """
         self._volatile_db.header.update_one({'run_id': self._run_uid},
                                             {'$push': {name: doc}},
                                             upsert=True)
 
     def _bulkwrite_datum(self, datum_buffer):
+        """
+        Bulk writes datum_pages to Mongo datum collection.
+        """
         operations = [self._updateone_datumpage(resource, datum_page)
                       for resource, datum_page in datum_buffer.items()]
         self._volatile_db.datum.bulk_write(operations, ordered=False)
 
     def _bulkwrite_event(self, event_buffer):
+        """
+        Bulk writes event_pages to Mongo event collection.
+        """
         operations = [self._updateone_eventpage(descriptor, eventpage)
                       for descriptor, eventpage in event_buffer.items()]
         self._volatile_db.event.bulk_write(operations, ordered=False)
 
     def _updateone_eventpage(self, descriptor, event_page):
+        """
+        Creates the UpdateOne command that gets used with bulk_write.
+        """
         event_size = sys.getsizeof(event_page)
 
         data_string = {'data.' + key: {'$each': value_array}
@@ -183,6 +285,9 @@ class Serializer(event_model.DocumentRouter):
             upsert=True)
 
     def _updateone_datumpage(self, resource, datum_page):
+        """
+        Creates the UpdateOne command that gets used with bulk_write.
+        """
         datum_size = sys.getsizeof(datum_page)
 
         kwargs_string = {'datum_kwargs.' + key: {'$each': value_array}
@@ -218,7 +323,9 @@ class DocBuffer():
 
     "embedding" refers to combining multiple documents from a stream of
     documents into a single document, where the values of matching keys are
-    stored as a list, or dictionary of lists.
+    stored as a list, or dictionary of lists. "embedding" converts event docs
+    to event_pages, or datum doc to datum_pages. event_pages and datum_pages
+    are defined by the bluesky event-model.
 
     Events with different descriptors, or datum with different resources are
     stored in separate embedded documents in the buffer. The buffer uses a
@@ -230,8 +337,7 @@ class DocBuffer():
     The the details of the embedding differ for event and datum documents.
 
     Internally the buffer is a dictionary that maps event decriptors to
-    event_pages and datum resources to datum_pages. event_pages and datum_pages
-    are defined by the bluesky event-model.
+    event_pages or datum resources to datum_pages.
 
     Parameters
     ----------
@@ -332,6 +438,7 @@ class DocBuffer():
             return doc_buffer_dump
 
     def _buffer_insert(self, doc):
+        # Embed the doc in the buffer
         for key, value in doc.items():
             if key in self._array_keys:
                 self._doc_buffer[doc[self._stream_id_key]][key] = list(
@@ -345,6 +452,9 @@ class DocBuffer():
                 self._doc_buffer[doc[self._stream_id_key]][key] = value
 
     def freeze(self):
+        """
+        Freeze the buffer preventing new inserts and stop dump from blocking
+        """
         self._frozen = True
         self._mutex.acquire()
         self._not_empty.notify_all()
