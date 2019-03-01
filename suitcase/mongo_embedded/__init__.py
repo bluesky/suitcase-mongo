@@ -310,7 +310,7 @@ class Serializer(event_model.DocumentRouter):
                        **update_string},
              '$inc': {'size': event_size},
              '$min': {'first_index': self._event_count[descriptor_id] - count},
-             '$max': {'last_index': self._event_count[descriptor_id]}},
+             '$max': {'last_index': self._event_count[descriptor_id]-1}},
             upsert=True)
 
     def _updateone_datumpage(self, resource_id, datum_page):
@@ -332,7 +332,7 @@ class Serializer(event_model.DocumentRouter):
                        **kwargs_string},
              '$inc': {'size': datum_size},
              '$min': {'first_index': (self._datum_count[resource_id] - count)},
-             '$max': {'last_index': self._datum_count[resource_id]}},
+             '$max': {'last_index': self._datum_count[resource_id]-1}},
             upsert=True)
 
     def _check_start(self, doc):
