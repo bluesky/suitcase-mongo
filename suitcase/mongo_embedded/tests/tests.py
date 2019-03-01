@@ -3,6 +3,7 @@
 
 from suitcase.mongo_embedded import Serializer
 
+
 def test_export(db_factory, example_data):
     documents = example_data()
     volatile_db = db_factory()
@@ -10,6 +11,7 @@ def test_export(db_factory, example_data):
     serializer = Serializer(volatile_db, permanent_db)
     for item in documents:
         serializer(*item)
+
 
 def test_multithread(db_factory, example_data):
     documents = example_data()
@@ -19,6 +21,7 @@ def test_multithread(db_factory, example_data):
     for item in documents:
         serializer(*item)
 
+
 def test_smallbuffer(db_factory, example_data):
     documents = example_data()
     volatile_db = db_factory()
@@ -26,6 +29,7 @@ def test_smallbuffer(db_factory, example_data):
     serializer = Serializer(volatile_db, permanent_db, buffer_size=1000)
     for item in documents:
         serializer(*item)
+
 
 def test_smallpage(db_factory, example_data):
     documents = example_data()

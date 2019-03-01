@@ -114,8 +114,11 @@ class Serializer(event_model.DocumentRouter):
         self._run_uid = None
         self._frozen = False
 
+        self._event_count = defaultdict(lambda: 0)
+        self._datum_count = defaultdict(lambda: 0)
+
         # Start workers.
-        self._executor = ThreadPoolExecutor(max_workers=num_threads)
+        self._executor = ThreadPoolExecutor(max_workers=1)
         self._executor.submit(self._event_worker)
         self._executor.submit(self._datum_worker)
 
@@ -278,7 +281,7 @@ class Serializer(event_model.DocumentRouter):
                       for descriptor, eventpage in event_buffer.items()]
         self._volatile_db.event.bulk_write(operations, ordered=False)
 
-    def _updateone_eventpage(self, descriptor, event_page):
+    def _updateone_eventpage(self, descriptor_id, event_page):
         """
         Creates the UpdateOne command that gets used with bulk_write.
         """
@@ -296,16 +299,21 @@ class Serializer(event_model.DocumentRouter):
 
         update_string = {**data_string, **timestamp_string, **filled_string}
 
+        count = len(event_page['seq_num'])
+        self._event_count[descriptor_id] += count
+
         return UpdateOne(
-            {'descriptor': descriptor, 'size': {'$lt': self._PAGE_SIZE}},
+            {'descriptor': descriptor_id, 'size': {'$lt': self._PAGE_SIZE}},
             {'$push': {'uid': {'$each': event_page['uid']},
                        'time': {'$each': event_page['time']},
                        'seq_num': {'$each': event_page['seq_num']},
                        **update_string},
-             '$inc': {'size': event_size}},
+             '$inc': {'size': event_size},
+             '$min': {'first_index': self._event_count[descriptor_id] - count},
+             '$max': {'last_index': self._event_count[descriptor_id]}},
             upsert=True)
 
-    def _updateone_datumpage(self, resource, datum_page):
+    def _updateone_datumpage(self, resource_id, datum_page):
         """
         Creates the UpdateOne command that gets used with bulk_write.
         """
@@ -315,11 +323,16 @@ class Serializer(event_model.DocumentRouter):
                          for key, value_array
                          in datum_page['datum_kwargs'].items()}
 
+        count = len(datum_page['seq_number'])
+        self._datum_count[resource_id] += count
+
         return UpdateOne(
-            {'resource': resource, 'size': {'$lt': self._MAX_DOC_SIZE}},
-            {'$pushall': {'datum_id': {'$each': datum_page['uid']},
-                          **kwargs_string},
-             '$inc': {'size': datum_size}},
+            {'resource': resource_id, 'size': {'$lt': self._PAGE_SIZE}},
+            {'$push': {'datum_id': {'$each': datum_page['uid']},
+                       **kwargs_string},
+             '$inc': {'size': datum_size},
+             '$min': {'first_index': (self._datum_count[resource_id] - count)},
+             '$max': {'last_index': self._datum_count[resource_id]}},
             upsert=True)
 
     def _check_start(self, doc):
