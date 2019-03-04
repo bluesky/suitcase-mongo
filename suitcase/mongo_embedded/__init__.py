@@ -202,6 +202,9 @@ class Serializer(event_model.DocumentRouter):
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
 
+        self._insert_header('event_count', sum(self._event_count.values()))
+        self._insert_header('datum_count', sum(self._datum_count.values()))
+
         # Raise exception if buffers are not empty.
         assert self._event_buffer.current_size == 0
         assert self._datum_buffer.current_size == 0

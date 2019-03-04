@@ -22,4 +22,4 @@ serializer = Serializer(volatile_db, permanent_db)
 
 RE = RunEngine({})
 RE.subscribe(serializer)
-RE(scan([det], motor, 1, 10, 10))
+RE(scan([det], motor, 1, 10, 10000))
