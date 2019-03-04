@@ -202,8 +202,8 @@ class Serializer(event_model.DocumentRouter):
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
 
-        self._insert_header('event_count', sum(self._event_count.values()))
-        self._insert_header('datum_count', sum(self._datum_count.values()))
+        self._set_header('event_count', sum(self._event_count.values()))
+        self._set_header('datum_count', sum(self._datum_count.values()))
 
         # Raise exception if buffers are not empty.
         assert self._event_buffer.current_size == 0
@@ -267,6 +267,13 @@ class Serializer(event_model.DocumentRouter):
         self._volatile_db.header.update_one({'run_id': self._run_uid},
                                             {'$push': {name: doc}},
                                             upsert=True)
+
+    def _set_header(self, name,  doc):
+        """
+        Inserts header document into the run's header document.
+        """
+        self._volatile_db.header.update_one({'run_id': self._run_uid},
+                                            {'$set': {name: doc}})
 
     def _bulkwrite_datum(self, datum_buffer):
         """
