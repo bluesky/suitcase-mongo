@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
 import threading
 import sys
+import time
 
 __version__ = get_versions()['version']
 del get_versions
@@ -114,13 +115,22 @@ class Serializer(event_model.DocumentRouter):
         self._run_uid = None
         self._frozen = False
 
+
+        # _event_count and _datum_count are used for setting first/last_index
+        # fields of event and datum pages
         self._event_count = defaultdict(lambda: 0)
         self._datum_count = defaultdict(lambda: 0)
+
+        # These counters are used to track the total number of events and datum
+        # that have been successfully inserted into the database.
+        self._db_event_count = 0
+        self._db_datum_count = 0
 
         # Start workers.
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._executor.submit(self._event_worker)
         self._executor.submit(self._datum_worker)
+        self._executor.submit(self._count_worker)
 
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
@@ -133,17 +143,41 @@ class Serializer(event_model.DocumentRouter):
         while not self._frozen:
             event_dump = self._event_buffer.dump()
             self._bulkwrite_event(event_dump)
+            self._db_event_count = sum([len(event_page['seq_num'])
+                                    for event_page in event_dump])
 
     def _datum_worker(self):
         # Gets the datum buffer and writes it to the volatile database.
         while not self._frozen:
             datum_dump = self._datum_buffer.dump()
             self._bulkwrite_datum(datum_dump)
+            self._db_datum_count = sum([len(datum_page['datum_id'])
+                                    for datum_page in datum_dump])
+
+    def _count_worker(self):
+        # Updates event_count and datum_count in the header document
+
+        last_event_count = 0
+        last_datum_count = 0
+
+        while not self._frozen:
+            time.sleep(5)
+            # Only updates the header if the count has changed.
+            if ((self._db_event_count > last_event_count) 
+                or self._db_datum_count > last_datum_count)):
+                    self._volatile_db.header.update_one(
+                        {'run_id': self._run_uid},
+                        {'$set': {'event_count': self._db_event_count),
+                                  'datum_count': self._db_datum_count}})
+                    last_event_count = self._db_event_count
+                    last_datum_count = self._db_datum_count
 
     def start(self, doc):
         self._check_start(doc)
         self._run_uid = doc['uid']
         self._insert_header('start', doc)
+        self._insert_header('event_count', doc)
+        self._insert_header('datum_count', doc)
         return doc
 
     def stop(self, doc):
@@ -333,7 +367,7 @@ class Serializer(event_model.DocumentRouter):
                          for key, value_array
                          in datum_page['datum_kwargs'].items()}
 
-        count = len(datum_page['seq_number'])
+        count = len(datum_page['datum_id'])
         self._datum_count[resource_id] += count
 
         return UpdateOne(
