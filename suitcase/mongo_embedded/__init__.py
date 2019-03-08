@@ -486,7 +486,7 @@ class DocBuffer():
         """
 
         if self.worker_error:
-            raise RuntimeError(self.worker_error)
+            raise RuntimeError("Worker exception: " + self.worker_error)
 
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
