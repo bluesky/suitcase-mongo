@@ -1,2 +1,2 @@
 [flake8]
-exclude = .git,__pycache__,build,dist,versioneer.py,mongo/_version.py,docs/source/conf.py,suitcase/mongo_layout2/*
+exclude = .git,__pycache__,build,dist,versioneer.py,mongo/_version.py,docs/source/conf.py

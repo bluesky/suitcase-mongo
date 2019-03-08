@@ -43,7 +43,7 @@ def get_config():
     cfg.style = "pep440-post"
     cfg.tag_prefix = "v"
     cfg.parentdir_prefix = "None"
-    cfg.versionfile_source = "suitcase/mongo_layout2/_version.py"
+    cfg.versionfile_source = "suitcase/mongo_embedded/_version.py"
     cfg.verbose = False
     return cfg
 

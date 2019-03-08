@@ -92,13 +92,17 @@ class Serializer(event_model.DocumentRouter):
             default is 5000000.
         """
 
+        # There is no performace improvment for more than 10 threads. Tests
+        # validate for upto 10 threads.
         if num_threads > 10 or num_threads < 1:
-            raise AttributeError(f"num_threads must be between 1 and 5 "
+            raise AttributeError(f"num_threads must be between 1 and 10"
                                  "inclusive.")
 
-        if page_size < 10000:
+        if page_size < 1000:
             raise AttributeError(f"page_size must be >= 10000")
 
+        # Maximum size of a document in mongo is 16MB. buffer_size + page_size
+        # defines the biggest document that can be created.
         if buffer_size + page_size > 15000000:
             raise AttributeError(f"buffer_size: {buffer_size} + page_size: "
                                  "page_size} is greater then 15000000.")
@@ -109,12 +113,10 @@ class Serializer(event_model.DocumentRouter):
         self._volatile_db = volatile_db
         self._event_buffer = DocBuffer('event', self._BUFFER_SIZE)
         self._datum_buffer = DocBuffer('datum', self._BUFFER_SIZE)
-        # kwargs.setdefault('cls', NumpyEncoder)
         self._kwargs = kwargs
         self._start_found = False
         self._run_uid = None
         self._frozen = False
-
 
         # _event_count and _datum_count are used for setting first/last_index
         # fields of event and datum pages
@@ -141,18 +143,28 @@ class Serializer(event_model.DocumentRouter):
     def _event_worker(self):
         # Gets the event buffer and writes it to the volatile database.
         while not self._frozen:
-            event_dump = self._event_buffer.dump()
-            self._bulkwrite_event(event_dump)
-            self._db_event_count = sum([len(event_page['seq_num'])
-                                    for event_page in event_dump])
+            try:
+                event_dump = self._event_buffer.dump()
+                self._bulkwrite_event(event_dump)
+                self._db_event_count = sum([len(event_page['seq_num'])
+                                           for event_page
+                                           in event_dump.values()])
+            except BaseException as error:
+                self._datum_buffer.worker_error = error
+                self._event_buffer.worker_error = error
 
     def _datum_worker(self):
         # Gets the datum buffer and writes it to the volatile database.
         while not self._frozen:
-            datum_dump = self._datum_buffer.dump()
-            self._bulkwrite_datum(datum_dump)
-            self._db_datum_count = sum([len(datum_page['datum_id'])
-                                    for datum_page in datum_dump])
+            try:
+                datum_dump = self._datum_buffer.dump()
+                self._bulkwrite_datum(datum_dump)
+                self._db_datum_count = sum([len(datum_page['datum_id'])
+                                           for datum_page
+                                           in datum_dump.values()])
+            except BaseException as error:
+                self._datum_buffer.worker_error = error
+                self._event_buffer.worker_error = error
 
     def _count_worker(self):
         # Updates event_count and datum_count in the header document
@@ -161,16 +173,20 @@ class Serializer(event_model.DocumentRouter):
         last_datum_count = 0
 
         while not self._frozen:
-            time.sleep(5)
-            # Only updates the header if the count has changed.
-            if ((self._db_event_count > last_event_count) 
-                or self._db_datum_count > last_datum_count)):
+            try:
+                time.sleep(5)
+                # Only updates the header if the count has changed.
+                if ((self._db_event_count > last_event_count)
+                   or (self._db_datum_count > last_datum_count)):
                     self._volatile_db.header.update_one(
                         {'run_id': self._run_uid},
-                        {'$set': {'event_count': self._db_event_count),
+                        {'$set': {'event_count': self._db_event_count,
                                   'datum_count': self._db_datum_count}})
                     last_event_count = self._db_event_count
                     last_datum_count = self._db_datum_count
+            except BaseException as error:
+                self._datum_buffer.worker_error = error
+                self._event_buffer.worker_error = error
 
     def start(self, doc):
         self._check_start(doc)
@@ -388,10 +404,6 @@ class Serializer(event_model.DocumentRouter):
         else:
             self._start_found = True
 
-    def __repr__(self):
-        # Display connection info in eval-able repr.
-        return "temp repr"  # f'{type(self).__name__}(run_uid={self._run_uid})'
-
 
 class DocBuffer():
 
@@ -432,20 +444,20 @@ class DocBuffer():
     """
 
     def __init__(self, doc_type, buffer_size):
-        self.current_size = 0
+        self.worker_error = None
         self._frozen = False
         self._mutex = threading.Lock()
         self._not_full = threading.Condition(self._mutex)
         self._not_empty = threading.Condition(self._mutex)
-
         self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
                                                            defaultdict(list)))
+        self.current_size = 0
 
-        if (buffer_size >= 1000) and (buffer_size <= 15000000):
+        if (buffer_size >= 400) and (buffer_size <= 15000000):
             self._buffer_size = buffer_size
         else:
             raise AttributeError(f"Invalid buffer_size {buffer_size}, "
-                                 "buffer_size must be between 1000 and "
+                                 "buffer_size must be between 10000 and "
                                  "15000000 inclusive.")
 
         # Event docs and datum docs are embedded differently, this configures
@@ -472,15 +484,23 @@ class DocBuffer():
         doc: json
             A validated bluesky event or datum document.
         """
+
+        if self.worker_error:
+            raise RuntimeError(self.worker_error)
+
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
                                "frozen DocBuffer")
 
         doc_size = sys.getsizeof(doc)
 
+        if doc_size >= self._buffer_size:
+            raise RuntimeError("Failed to insert. Document size is greater "
+                               "than max buffer size")
+
         # Block if buffer is full.
         with self._not_full:
-            self._not_full.wait_for(lambda: self.current_size + doc_size
+            self._not_full.wait_for(lambda: (self.current_size + doc_size)
                                     < self._buffer_size)
             self._buffer_insert(doc)
             self.current_size += doc_size
@@ -498,7 +518,6 @@ class DocBuffer():
             A dictionary that maps event descriptor to event_page, or a
             dictionary that maps datum resource to datum_page.
         """
-
         # Block if the buffer is empty.
         # Don't block if the buffer is frozen, this allows all workers threads
         # finish when freezing the run.
