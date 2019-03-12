@@ -125,8 +125,8 @@ class Serializer(event_model.DocumentRouter):
 
         # These counters are used to track the total number of events and datum
         # that have been successfully inserted into the database.
-        self._db_event_count = 0
-        self._db_datum_count = 0
+        self._db_event_count = defaultdict(lambda: 0)
+        self._db_datum_count = defaultdict(lambda: 0)
 
         # Start workers.
         self._executor = ThreadPoolExecutor(max_workers=1)
@@ -146,9 +146,9 @@ class Serializer(event_model.DocumentRouter):
             try:
                 event_dump = self._event_buffer.dump()
                 self._bulkwrite_event(event_dump)
-                self._db_event_count = sum([len(event_page['seq_num'])
-                                           for event_page
-                                           in event_dump.values()])
+                for descriptor_uid, event_page in event_dump.items():
+                    self._db_event_count['event_count.' + descriptor_uid] = len(
+                                          event_page['seq_num'])
             except BaseException as error:
                 self._datum_buffer.worker_error = error
                 self._event_buffer.worker_error = error
@@ -159,9 +159,9 @@ class Serializer(event_model.DocumentRouter):
             try:
                 datum_dump = self._datum_buffer.dump()
                 self._bulkwrite_datum(datum_dump)
-                self._db_datum_count = sum([len(datum_page['datum_id'])
-                                           for datum_page
-                                           in datum_dump.values()])
+                for resource_uid, datum_page in datum_dump.items():
+                    self._db_datum_count['datum_count.' + resource_uid] = len(
+                                          datum_page['datum_id'])
             except BaseException as error:
                 self._datum_buffer.worker_error = error
                 self._event_buffer.worker_error = error
@@ -178,10 +178,11 @@ class Serializer(event_model.DocumentRouter):
                 # Only updates the header if the count has changed.
                 if ((self._db_event_count > last_event_count)
                    or (self._db_datum_count > last_datum_count)):
+
                     self._volatile_db.header.update_one(
                         {'run_id': self._run_uid},
-                        {'$set': {'event_count': self._db_event_count,
-                                  'datum_count': self._db_datum_count}})
+                        {'$set': {self._db_event_count,
+                                  self._db_datum_count}})
                     last_event_count = self._db_event_count
                     last_datum_count = self._db_datum_count
             except BaseException as error:
