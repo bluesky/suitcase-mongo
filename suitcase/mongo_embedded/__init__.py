@@ -176,10 +176,7 @@ class Serializer(event_model.DocumentRouter):
 
         while not self._frozen:
             try:
-                print("COUNTING")
                 time.sleep(5)
-
-                print(dict(last_event_count))
 
                 # Only updates the header if the count has changed.
                 if (
