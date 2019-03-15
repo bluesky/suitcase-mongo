@@ -129,10 +129,12 @@ class Serializer(event_model.DocumentRouter):
         self._db_datum_count = defaultdict(lambda: 0)
 
         # Start workers.
-        self._executor = ThreadPoolExecutor(max_workers=1)
-        self._executor.submit(self._event_worker)
-        self._executor.submit(self._datum_worker)
-        self._executor.submit(self._count_worker)
+        self._event_executor = ThreadPoolExecutor(max_workers=1)
+        self._datum_executor = ThreadPoolExecutor(max_workers=1)
+        self._count_executor = ThreadPoolExecutor(max_workers=1)
+        self._event_executor.submit(self._event_worker)
+        self._datum_executor.submit(self._datum_worker)
+        self._count_executor.submit(self._count_worker)
 
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
@@ -147,7 +149,7 @@ class Serializer(event_model.DocumentRouter):
                 event_dump = self._event_buffer.dump()
                 self._bulkwrite_event(event_dump)
                 for descriptor_uid, event_page in event_dump.items():
-                    self._db_event_count['event_count.' + descriptor_uid] = len(
+                    self._db_event_count['count_' + descriptor_uid] += len(
                                           event_page['seq_num'])
             except BaseException as error:
                 self._datum_buffer.worker_error = error
@@ -160,7 +162,7 @@ class Serializer(event_model.DocumentRouter):
                 datum_dump = self._datum_buffer.dump()
                 self._bulkwrite_datum(datum_dump)
                 for resource_uid, datum_page in datum_dump.items():
-                    self._db_datum_count['datum_count.' + resource_uid] = len(
+                    self._db_datum_count['count_' + resource_uid] += len(
                                           datum_page['datum_id'])
             except BaseException as error:
                 self._datum_buffer.worker_error = error
@@ -169,20 +171,28 @@ class Serializer(event_model.DocumentRouter):
     def _count_worker(self):
         # Updates event_count and datum_count in the header document
 
-        last_event_count = 0
-        last_datum_count = 0
+        last_event_count = defaultdict(lambda: 0)
+        last_datum_count = defaultdict(lambda: 0)
 
         while not self._frozen:
             try:
+                print("COUNTING")
                 time.sleep(5)
-                # Only updates the header if the count has changed.
-                if ((self._db_event_count > last_event_count)
-                   or (self._db_datum_count > last_datum_count)):
 
+                print(dict(last_event_count))
+
+                # Only updates the header if the count has changed.
+                if (
+                        (sum(self._db_event_count.values()) >
+                        sum(last_event_count.values()))
+                        or (sum(self._db_datum_count.values()) >
+                        sum(last_datum_count.values()))
+                   ):
                     self._volatile_db.header.update_one(
                         {'run_id': self._run_uid},
-                        {'$set': {self._db_event_count,
-                                  self._db_datum_count}})
+                        {'$set': {**dict(self._db_event_count),
+                                  **dict(self._db_datum_count)}})
+
                     last_event_count = self._db_event_count
                     last_datum_count = self._db_datum_count
             except BaseException as error:
@@ -243,7 +253,9 @@ class Serializer(event_model.DocumentRouter):
         self._datum_buffer.freeze()
 
         # Wait for the workers to finish.
-        self._executor.shutdown(wait=True)
+        self._count_executor.shutdown(wait=False)
+        self._event_executor.shutdown(wait=True)
+        self._datum_executor.shutdown(wait=True)
 
         # Flush the buffers if there is anything in them.
         if self._event_buffer.current_size > 0:
@@ -338,8 +350,8 @@ class Serializer(event_model.DocumentRouter):
         """
         Bulk writes event_pages to Mongo event collection.
         """
-        operations = [self._updateone_eventpage(descriptor, eventpage)
-                      for descriptor, eventpage in event_buffer.items()]
+        operations = [self._updateone_eventpage(descriptor, event_page)
+                      for descriptor, event_page in event_buffer.items()]
         self._volatile_db.event.bulk_write(operations, ordered=False)
 
     def _updateone_eventpage(self, descriptor_id, event_page):
@@ -371,7 +383,7 @@ class Serializer(event_model.DocumentRouter):
                        **update_string},
              '$inc': {'size': event_size},
              '$min': {'first_index': self._event_count[descriptor_id] - count},
-             '$max': {'last_index': self._event_count[descriptor_id]-1}},
+             '$max': {'last_index': self._event_count[descriptor_id] - 1}},
             upsert=True)
 
     def _updateone_datumpage(self, resource_id, datum_page):
@@ -389,11 +401,11 @@ class Serializer(event_model.DocumentRouter):
 
         return UpdateOne(
             {'resource': resource_id, 'size': {'$lt': self._PAGE_SIZE}},
-            {'$push': {'datum_id': {'$each': datum_page['uid']},
+            {'$push': {'datum_id': {'$each': datum_page['datum_id']},
                        **kwargs_string},
              '$inc': {'size': datum_size},
-             '$min': {'first_index': (self._datum_count[resource_id] - count)},
-             '$max': {'last_index': self._datum_count[resource_id]-1}},
+             '$min': {'first_index': self._datum_count[resource_id] - count},
+             '$max': {'last_index': self._datum_count[resource_id] - 1}},
             upsert=True)
 
     def _check_start(self, doc):
@@ -487,7 +499,7 @@ class DocBuffer():
         """
 
         if self.worker_error:
-            raise RuntimeError("Worker exception: " + self.worker_error)
+            raise RuntimeError("Worker exception: " + str(self.worker_error))
 
         if self._frozen:
             raise RuntimeError("Cannot insert documents into a "
