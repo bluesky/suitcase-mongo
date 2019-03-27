@@ -181,9 +181,9 @@ class Serializer(event_model.DocumentRouter):
                 # Only updates the header if the count has changed.
                 if (
                         (sum(self._db_event_count.values()) >
-                        sum(last_event_count.values()))
+                         sum(last_event_count.values()))
                         or (sum(self._db_datum_count.values()) >
-                        sum(last_datum_count.values()))
+                            sum(last_datum_count.values()))
                    ):
                     self._volatile_db.header.update_one(
                         {'run_id': self._run_uid},
