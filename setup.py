@@ -40,6 +40,7 @@ setup(
     packages=['suitcase.mongo_normalized', 'suitcase.mongo_normalized.tests',
               'suitcase.mongo_embedded',  'suitcase.mongo_embedded.tests'
               ],
+    long_description_content_type='text/markdown',
     entry_points={
         'console_scripts': [
             # 'some.module:some_function',
