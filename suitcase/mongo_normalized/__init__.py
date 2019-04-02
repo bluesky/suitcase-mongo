@@ -29,7 +29,8 @@ class Serializer(event_model.DocumentRouter):
             assets_db = asset_registry_db
         self._run_start_collection = mds_db.get_collection('run_start')
         self._run_stop_collection = mds_db.get_collection('run_stop')
-        self._event_descriptor_collection = mds_db.get_collection('event_descriptor')
+        self._event_descriptor_collection = mds_db.get_collection(
+                                                        'event_descriptor')
         self._event_collection = mds_db.get_collection('event')
 
         self._resource_collection = assets_db.get_collection('resource')

@@ -67,7 +67,7 @@ source_suffix = '.rst'
 master_doc = 'index'
 
 # General information about the project.
-project = 'suitcase.mongo_layout2'
+project = 'suitcase.mongo_embedded'
 copyright = 'suitcase.mongo Contributors'
 author = 'suitcase.mongo Contributors'
 
@@ -75,9 +75,9 @@ author = 'suitcase.mongo Contributors'
 # |version| and |release|, also used in various other places throughout the
 # built documents.
 #
-import suitcase.mongo_layout2
+import suitcase.mongo_embedded
 # The short X.Y version.
-version = suitcase.mongo_layout2.__version__
+version = suitcase.mongo_embedded.__version__
 # The full version, including alpha/beta/rc tags.
 release = version
 
