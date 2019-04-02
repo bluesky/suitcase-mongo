@@ -3,7 +3,6 @@ from ._version import get_versions
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
-import threading
 import sys
 import time
 import queue
@@ -70,7 +69,7 @@ class Serializer(event_model.DocumentRouter):
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
                  queue_size=20, embedder_size=1000000, page_size=5000000,
-                 max_insert_time = 10, **kwargs):
+                 max_insert_time=10, **kwargs):
 
         """
         Insert documents into MongoDB using an embedded data model.
@@ -109,9 +108,9 @@ class Serializer(event_model.DocumentRouter):
 
         # Maximum size of a document in mongo is 16MB. buffer_size + page_size
         # defines the biggest document that can be created.
-        if embed_size + page_size > 15000000:
-            raise AttributeError(f"buffer_size: {buffer_size} + page_size: "
-                                 "page_size} is greater then 15000000.")
+        if embedder_size + page_size > 15000000:
+            raise AttributeError(f"embedder_size: {embedder_size} + page_size:"
+                                 "{page_size} is greater then 15000000.")
 
         self._QUEUE_SIZE = queue_size
         self._EMBED_SIZE = embedder_size
@@ -160,7 +159,7 @@ class Serializer(event_model.DocumentRouter):
 
         return super().__call__(name, sanitized_doc)
 
-    def _event_worker(self, max_insert_time)
+    def _event_worker(self, max_insert_time):
         # Gets events from the queue, embedds them, and writes them to the
         # volatile database.
 
@@ -175,7 +174,7 @@ class Serializer(event_model.DocumentRouter):
             try:
                 if event is None:
                     event = self._event_queue.get(timeout=0.5)
-            except Empty:
+            except queue.Empty:
                 do_push = True
             else:
                 # embedder.insert() returns None if the document is inserted,
@@ -183,17 +182,18 @@ class Serializer(event_model.DocumentRouter):
                 if event is not False:
                     event = self._event_embedder.insert(event)
             try:
-                if (event is not None
-                    or event is False
-                    or do_push
-                    or time.monotonic() > last_push + max_insert_time):
+                if (
+                        event is not None
+                        or event is False
+                        or do_push
+                        or time.monotonic() > last_push + max_insert_time):
 
                     if not self._event_embedder.empty():
                         event_dump = self._event_embedder.dump()
                         self._bulkwrite_event(event_dump)
-                        for descriptor_uid, event_page in event_dump.items():
-                            self._db_event_count['count_' + descriptor_uid] += (
-                                len(event_page['seq_num'])
+                        for descriptor, event_page in event_dump.items():
+                            self._db_event_count['count_' + descriptor] += len(
+                                    event_page['seq_num'])
                     last_push = time.monotonic()
                     do_push = False
             except BaseException as error:
@@ -214,7 +214,7 @@ class Serializer(event_model.DocumentRouter):
             try:
                 if datum is None:
                     datum = self._datum_queue.get(timeout=0.5)
-            except Empty:
+            except queue.Empty:
                 do_push = True
             else:
                 # embedder.insert() returns None if the document is inserted,
@@ -222,17 +222,18 @@ class Serializer(event_model.DocumentRouter):
                 if datum is not False:
                     datum = self._datum_embedder.insert(datum)
             try:
-                if (datum is not None
-                    or datum is False
-                    or do_push
-                    or time.monotonic() > last_push + max_insert_time):
+                if (
+                        datum is not None
+                        or datum is False
+                        or do_push
+                        or time.monotonic() > last_push + max_insert_time):
 
                     if not self._datum_embedder.empty():
                         datum_dump = self._datum_embedder.dump()
                         self._bulkwrite_datum(datum_dump)
-                        for resource_uid, datum_page in datum_dump.items():
-                            self._db_datum_count['count_' + resource_uid] += (
-                                len(datum_page['datum_id'])
+                        for resource, datum_page in datum_dump.items():
+                            self._db_datum_count['count_' + resource] += len(
+                                    datum_page['datum_id'])
                     last_push = time.monotonic()
                     do_push = False
             except BaseException as error:
@@ -319,14 +320,6 @@ class Serializer(event_model.DocumentRouter):
         self._count_executor.shutdown(wait=False)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
-
-        # Flush the buffers if there is anything in them.
-        #if self._event_embedder.current_size > 0:
-        #    event_dump = self._event_embedder.dump()
-        #    self._bulkwrite_event(event_dump)
-        #if self._datum_embedder.current_size > 0:
-        #    datum_dump = self._datum_embedder.dump()
-        #    self._bulkwrite_datum(datum_dump)
 
         self._set_header('event_count', sum(self._event_count.values()))
         self._set_header('datum_count', sum(self._datum_count.values()))
@@ -449,7 +442,7 @@ class Serializer(event_model.DocumentRouter):
              '$inc': {'size': event_size},
              '$min': {'first_index': self._event_count[descriptor_id] - count},
              '$max': {'last_index': self._event_count[descriptor_id] - 1}},
-             upsert=True)
+            upsert=True)
 
     def _updateone_datumpage(self, resource_id, datum_page):
         """
@@ -558,9 +551,8 @@ class Embedder():
         """
         # Get a reference to the current dict, create a new dict.
         embedder_dump = self._embedder
-        self._embedder = defaultdict(lambda:
-                                       defaultdict(lambda:
-                                                   defaultdict(list)))
+        self._embedder = defaultdict(lambda: defaultdict(lambda:
+                                                         defaultdict(list)))
         self.current_size = 0
         return embedder_dump
 
@@ -595,5 +587,5 @@ class Embedder():
         self.current_size += doc_size
         return None
 
-    def empty():
+    def empty(self):
         return not self.current_size
