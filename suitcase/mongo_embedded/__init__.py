@@ -70,7 +70,7 @@ class Serializer(event_model.DocumentRouter):
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
                  queue_size=20, embedder_size=1000000, page_size=5000000,
-                 **kwargs):
+                 max_insert_time = 10, **kwargs):
 
         """
         Insert documents into MongoDB using an embedded data model.
@@ -93,6 +93,9 @@ class Serializer(event_model.DocumentRouter):
             default is 5000000.
         embedder_size: int, optional
             maximum size of the embedder
+        max_insert_time: int, optional
+            maximum time that the workers will wait before doing a database
+            insert.
         """
 
         # There is no performace improvment for more than 10 threads. Tests
@@ -113,6 +116,7 @@ class Serializer(event_model.DocumentRouter):
         self._QUEUE_SIZE = queue_size
         self._EMBED_SIZE = embedder_size
         self._PAGE_SIZE = page_size
+        self._MAX_INSERT_TIME = max_insert_time
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
         self._event_queue = queue.Queue(maxsize=self._QUEUE_SIZE)
@@ -139,8 +143,8 @@ class Serializer(event_model.DocumentRouter):
         self._event_executor = ThreadPoolExecutor(max_workers=1)
         self._datum_executor = ThreadPoolExecutor(max_workers=1)
         self._count_executor = ThreadPoolExecutor(max_workers=1)
-        self._event_executor.submit(self._event_worker)
-        self._datum_executor.submit(self._datum_worker)
+        self._event_executor.submit(self._event_worker(self._MAX_INSERT_TIME))
+        self._datum_executor.submit(self._datum_worker(self._MAX_INSERT_TIME))
         self._count_executor.submit(self._count_worker)
 
     def __call__(self, name, doc):
@@ -156,13 +160,16 @@ class Serializer(event_model.DocumentRouter):
 
         return super().__call__(name, sanitized_doc)
 
-    def _event_worker(self):
-         # Gets events from the queue, embedds them, and writes them to the
-         # volatile database.
+    def _event_worker(self, max_insert_time)
+        # Gets events from the queue, embedds them, and writes them to the
+        # volatile database.
 
         last_push = 0
         event = None
-        while not self._frozen:
+
+        # When a stop document is received 'False' is pushed on to the
+        # queue, this signals the worker to finish.
+        while event is not False:
             last_push = time.monotonic()
             do_push = False
             try:
@@ -171,33 +178,65 @@ class Serializer(event_model.DocumentRouter):
             except Empty:
                 do_push = True
             else:
-                if event == False:
-                    return
-                event = self._event_embedder.insert(event)
-            if event is not None or do_push or time.monotonic() > last_push + .5:
-                try:
-                    event_dump = self._event_embedder.dump()
-                    self._bulkwrite_event(event_dump)
-                    for descriptor_uid, event_page in event_dump.items():
-                        self._db_event_count['count_' + descriptor_uid] += len(
-                                              event_page['seq_num'])
-                    last_push = time.monotonic()
-                except BaseException as error:
-                    self._datum_buffer.worker_error = error
-                    self._event_buffer.worker_error = error
-
-    def _datum_worker(self):
-        # Gets the datum buffer and writes it to the volatile database.
-        while not self._frozen:
+                # embedder.insert() returns None if the document is inserted,
+                # and returns the document, if embedder is full.
+                if event is not False:
+                    event = self._event_embedder.insert(event)
             try:
-                datum_dump = self._datum_buffer.dump()
-                self._bulkwrite_datum(datum_dump)
-                for resource_uid, datum_page in datum_dump.items():
-                    self._db_datum_count['count_' + resource_uid] += len(
-                                          datum_page['datum_id'])
+                if (event is not None
+                    or event is False
+                    or do_push
+                    or time.monotonic() > last_push + max_insert_time):
+
+                    if not self._event_embedder.empty():
+                        event_dump = self._event_embedder.dump()
+                        self._bulkwrite_event(event_dump)
+                        for descriptor_uid, event_page in event_dump.items():
+                            self._db_event_count['count_' + descriptor_uid] += (
+                                len(event_page['seq_num'])
+                    last_push = time.monotonic()
+                    do_push = False
             except BaseException as error:
-                self._datum_buffer.worker_error = error
-                self._event_buffer.worker_error = error
+                self._worker_error = error
+
+    def _datum_worker(self, max_insert_time):
+        # Gets datum from the queue, embedds them, and writes them to the
+        # volatile database.
+
+        last_push = 0
+        datum = None
+
+        # When a stop document is received 'False' is pushed on to the
+        # queue, this signals the worker to finish.
+        while datum is not False:
+            last_push = time.monotonic()
+            do_push = False
+            try:
+                if datum is None:
+                    datum = self._datum_queue.get(timeout=0.5)
+            except Empty:
+                do_push = True
+            else:
+                # embedder.insert() returns None if the document is inserted,
+                # and returns the document, if embedder is full.
+                if datum is not False:
+                    datum = self._datum_embedder.insert(datum)
+            try:
+                if (datum is not None
+                    or datum is False
+                    or do_push
+                    or time.monotonic() > last_push + max_insert_time):
+
+                    if not self._datum_embedder.empty():
+                        datum_dump = self._datum_embedder.dump()
+                        self._bulkwrite_datum(datum_dump)
+                        for resource_uid, datum_page in datum_dump.items():
+                            self._db_datum_count['count_' + resource_uid] += (
+                                len(datum_page['datum_id'])
+                    last_push = time.monotonic()
+                    do_push = False
+            except BaseException as error:
+                self._worker_error = error
 
     def _count_worker(self):
         # Updates event_count and datum_count in the header document
@@ -237,6 +276,8 @@ class Serializer(event_model.DocumentRouter):
 
     def stop(self, doc):
         self._insert_header('stop', doc)
+        self._event_queue.put(False)
+        self._datum_queue.put(False)
         self.close()
         return doc
 
