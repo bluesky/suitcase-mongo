@@ -69,7 +69,7 @@ class Serializer(event_model.DocumentRouter):
     """
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
-                 queue_size=10, page_size=5000000, embed_size=5000000,
+                 queue_size=20, embedder_size=1000000, page_size=5000000,
                  **kwargs):
 
         """
@@ -87,10 +87,12 @@ class Serializer(event_model.DocumentRouter):
         queue_size: int, optional
             maximum size of the queue.
         page_size: int, optional
-            The document size for event_page and datum_page documents. The
-            maximum event/datum_page size is buffer_size + page_size.
-            buffer_size + page_size must be less than 15000000.The
+            the document size for event_page and datum_page documents. The
+            maximum event/datum_page size is embedder_size + page_size.
+            embedder_size + page_size must be less than 15000000.The
             default is 5000000.
+        embedder_size: int, optional
+            maximum size of the embedder
         """
 
         # There is no performace improvment for more than 10 threads. Tests
@@ -100,16 +102,16 @@ class Serializer(event_model.DocumentRouter):
                                  "inclusive.")
 
         if page_size < 1000:
-            raise AttributeError(f"page_size must be >= 10000")
+            raise AttributeError(f"page_size must be >= 1000")
 
         # Maximum size of a document in mongo is 16MB. buffer_size + page_size
         # defines the biggest document that can be created.
         if embed_size + page_size > 15000000:
             raise AttributeError(f"buffer_size: {buffer_size} + page_size: "
-            las                     "page_size} is greater then 15000000.")
+                                 "page_size} is greater then 15000000.")
 
         self._QUEUE_SIZE = queue_size
-        self._EMBED_SIZE = embed_size
+        self._EMBED_SIZE = embedder_size
         self._PAGE_SIZE = page_size
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
@@ -152,33 +154,37 @@ class Serializer(event_model.DocumentRouter):
             raise RuntimeError("Cannot insert documents into "
                                "frozen Serializer.")
 
-        doc_size = sys.getsizeof(doc)
-
         return super().__call__(name, sanitized_doc)
 
     def _event_worker(self):
          # Gets events from the queue, embedds them, and writes them to the
          # volatile database.
+
         last_push = 0
+        event = None
         while not self._frozen:
             last_push = time.monotonic()
             do_push = False
             try:
-                event = self._event_queue.get(timeout=0.5)
+                if event is None:
+                    event = self._event_queue.get(timeout=0.5)
             except Empty:
                 do_push = True
             else:
-                self._event_embedder.insert(event)
-            if self._event_embedder.current_size
-            try:
-                event_dump = self._event_buffer.dump()
-                self._bulkwrite_event(event_dump)
-                for descriptor_uid, event_page in event_dump.items():
-                    self._db_event_count['count_' + descriptor_uid] += len(
-                                          event_page['seq_num'])
-            except BaseException as error:
-                self._datum_buffer.worker_error = error
-                self._event_buffer.worker_error = error
+                if event == False:
+                    return
+                event = self._event_embedder.insert(event)
+            if event is not None or do_push or time.monotonic() > last_push + .5:
+                try:
+                    event_dump = self._event_embedder.dump()
+                    self._bulkwrite_event(event_dump)
+                    for descriptor_uid, event_page in event_dump.items():
+                        self._db_event_count['count_' + descriptor_uid] += len(
+                                              event_page['seq_num'])
+                    last_push = time.monotonic()
+                except BaseException as error:
+                    self._datum_buffer.worker_error = error
+                    self._event_buffer.worker_error = error
 
     def _datum_worker(self):
         # Gets the datum buffer and writes it to the volatile database.
@@ -269,30 +275,26 @@ class Serializer(event_model.DocumentRouter):
         """
         # Freeze the serializer.
         self._frozen = True
-
-        # Freeze the buffers.
-        self._event_buffer.freeze()
-        self._datum_buffer.freeze()
-
-        # Wait for the workers to finish.
         self._count_executor.shutdown(wait=False)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
 
         # Flush the buffers if there is anything in them.
-        if self._event_buffer.current_size > 0:
-            event_dump = self._event_buffer.dump()
-            self._bulkwrite_event(event_dump)
-        if self._datum_buffer.current_size > 0:
-            datum_dump = self._datum_buffer.dump()
-            self._bulkwrite_datum(datum_dump)
+        #if self._event_embedder.current_size > 0:
+        #    event_dump = self._event_embedder.dump()
+        #    self._bulkwrite_event(event_dump)
+        #if self._datum_embedder.current_size > 0:
+        #    datum_dump = self._datum_embedder.dump()
+        #    self._bulkwrite_datum(datum_dump)
 
         self._set_header('event_count', sum(self._event_count.values()))
         self._set_header('datum_count', sum(self._datum_count.values()))
 
         # Raise exception if buffers are not empty.
-        assert self._event_buffer.current_size == 0
-        assert self._datum_buffer.current_size == 0
+        assert self._event_queue.empty()
+        assert self._datum_queue.empty()
+        assert self._event_embedder.empty()
+        assert self._datum_embedder.empty()
 
         # Copy the run to the permanent database.
         volatile_run = self._get_run(self._volatile_db, run_uid)
@@ -443,7 +445,7 @@ class Serializer(event_model.DocumentRouter):
 class Embedder():
 
     """
-    Embedder is a embeds normalized bluesky documents.
+    Embedder embeds normalized bluesky documents.
 
     "embedding" refers to combining multiple documents from a stream of
     documents into a single document, where the values of matching keys are
@@ -454,8 +456,8 @@ class Embedder():
     Events with different descriptors, or datum with different resources are
     stored in separate embedded documents. Embedder uses a defaultdict so new
     embedded documents are automatically created when they are needed. The dump
-    method totally clears the buffer. This mechanism automatically manages the
-    lifetime of the embeded documents in the buffer.
+    method returns the embedded dictionary. This mechanism manages the lifetime
+    of the event streams in the buffer.
 
     The doc_type argument which can be either 'event' or 'datum'.
     The the details of the embedding differ for event and datum documents.
@@ -467,8 +469,8 @@ class Embedder():
     ----------
     doc_type: str
         {'event', 'datum'}
-    buffer_size: int, optional
-        Maximum buffer size in bytes.
+    max_size: int
+        Maximum embedder size in bytes.
 
     Attributes
     ----------
@@ -482,11 +484,11 @@ class Embedder():
                                                          defaultdict(list)))
         self.current_size = 0
 
-        if (max_size >= 400) and (max_size <= 15000000):
+        if (max_size >= 1000) and (max_size <= 15000000):
             self._max_size = max_size
         else:
             raise AttributeError(f"Invalid max_size {max_size}, "
-                                 "max_size must be between 10000 and "
+                                 "max_size must be between 1000 and "
                                  "15000000 inclusive.")
 
         # Event docs and datum docs are embedded differently, this configures
@@ -534,20 +536,23 @@ class Embedder():
             True if insert is successful, False if it failed.
         """
         doc_size = sys.getsizeof(doc)
-        if (self.current_size + doc_size) > self._buffer_size:
-            return False
+        if (self.current_size + doc_size) > self._max_size:
+            return doc
 
         for key, value in doc.items():
             if key in self._array_keys:
-                self._doc_buffer[doc[self._stream_id_key]][key] = list(
-                    self._doc_buffer[doc[self._stream_id_key]][key])
-                self._doc_buffer[doc[self._stream_id_key]][key].append(value)
+                self._embedder[doc[self._stream_id_key]][key] = list(
+                    self._embedder[doc[self._stream_id_key]][key])
+                self._embedder[doc[self._stream_id_key]][key].append(value)
             elif key in self._dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    (self._doc_buffer[doc[self._stream_id_key]][key]
+                    (self._embedder[doc[self._stream_id_key]][key]
                         [inner_key].append(inner_value))
             else:
-                self._doc_buffer[doc[self._stream_id_key]][key] = value
+                self._embedder[doc[self._stream_id_key]][key] = value
 
         self.current_size += doc_size
-        return True
+        return None
+
+    def empty():
+        return not self.current_size
