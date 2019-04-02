@@ -7,8 +7,6 @@ caproto  # required in order to import ophyd test fixtures
 curio  # required in order to import ophyd test fixtures
 coverage
 flake8
-# TEMPORARY UNTIL https://github.com/NSLS-II/ophyd/pull/682 IS RELEASED
-git+git://github.com/awalter-bnl/ophyd@add-configure
 pytest >=3.9
 sphinx
 # These are dependencies of various sphinx extensions for documentation.
@@ -18,3 +16,7 @@ numpydoc
 sphinx-copybutton
 sphinx_rtd_theme
 trio  # required in order to import ophyd test fixtures
+event-model
+suitcase-utils[test_fixtures] >=0.1.0rc2
+# TEMPORARY UNTIL https://github.com/NSLS-II/ophyd/pull/682 IS RELEASED
+git+git://github.com/NSLS-II/ophyd@ophyd-for-suitcase-utils
