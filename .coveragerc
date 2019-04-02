@@ -1,5 +1,4 @@
 [run]
 branch = true
 include = suitcase/mongo_normalized/*, suitcase/mongo_embedded/*
-omit = suitcase/mongo_normalized/_version.py,
-suitcase/mongo_embedded/_version.py
+omit = suitcase/mongo_normalized/_version.py, suitcase/mongo_embedded/_version.py
