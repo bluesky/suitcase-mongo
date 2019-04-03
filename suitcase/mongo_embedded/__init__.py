@@ -115,7 +115,7 @@ class Serializer(event_model.DocumentRouter):
         self._QUEUE_SIZE = queue_size
         self._EMBED_SIZE = embedder_size
         self._PAGE_SIZE = page_size
-        self._MAX_INSERT_TIME = max_insert_time
+        self._MAX_INSERT = max_insert_time
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
         self._event_queue = queue.Queue(maxsize=self._QUEUE_SIZE)
@@ -142,8 +142,8 @@ class Serializer(event_model.DocumentRouter):
         self._event_executor = ThreadPoolExecutor(max_workers=1)
         self._datum_executor = ThreadPoolExecutor(max_workers=1)
         self._count_executor = ThreadPoolExecutor(max_workers=1)
-        self._event_executor.submit(self._event_worker(self._MAX_INSERT_TIME))
-        self._datum_executor.submit(self._datum_worker(self._MAX_INSERT_TIME))
+        self._event_executor.submit(self._event_worker)
+        self._datum_executor.submit(self._datum_worker)
         self._count_executor.submit(self._count_worker)
 
     def __call__(self, name, doc):
@@ -159,7 +159,7 @@ class Serializer(event_model.DocumentRouter):
 
         return super().__call__(name, sanitized_doc)
 
-    def _event_worker(self, max_insert_time):
+    def _event_worker(self):
         # Gets events from the queue, embedds them, and writes them to the
         # volatile database.
 
@@ -186,8 +186,7 @@ class Serializer(event_model.DocumentRouter):
                         event is not None
                         or event is False
                         or do_push
-                        or time.monotonic() > last_push + max_insert_time):
-
+                        or time.monotonic() > last_push + self._MAX_INSERT):
                     if not self._event_embedder.empty():
                         event_dump = self._event_embedder.dump()
                         self._bulkwrite_event(event_dump)
@@ -199,7 +198,7 @@ class Serializer(event_model.DocumentRouter):
             except BaseException as error:
                 self._worker_error = error
 
-    def _datum_worker(self, max_insert_time):
+    def _datum_worker(self):
         # Gets datum from the queue, embedds them, and writes them to the
         # volatile database.
 
@@ -226,7 +225,7 @@ class Serializer(event_model.DocumentRouter):
                         datum is not None
                         or datum is False
                         or do_push
-                        or time.monotonic() > last_push + max_insert_time):
+                        or time.monotonic() > last_push + self._MAX_INSERT):
 
                     if not self._datum_embedder.empty():
                         datum_dump = self._datum_embedder.dump()
