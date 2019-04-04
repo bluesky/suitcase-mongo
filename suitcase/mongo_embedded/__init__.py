@@ -127,6 +127,7 @@ class Serializer(event_model.DocumentRouter):
         self._run_uid = None
         self._frozen = False
         self._worker_error = None
+        self._stop_doc = None
 
         # _event_count and _datum_count are used for setting first/last_index
         # fields of event and datum pages
@@ -150,19 +151,29 @@ class Serializer(event_model.DocumentRouter):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
         sanitized_doc = event_model.sanitize_doc(doc)
-
         if self._worker_error:
-            raise RuntimeError("Worker exception: " + str(self.worker_error))
+            raise RuntimeError("Worker exception: ") from self._worker_error
         if self._frozen:
             raise RuntimeError("Cannot insert documents into "
                                "frozen Serializer.")
 
         return super().__call__(name, sanitized_doc)
 
+    def _try_wrapper(f):
+        from functools import wraps
+        @wraps(f)
+        def inner(self):
+            try:
+                f(self)
+            except Exception as error:
+                self._worker_error = error
+                raise
+        return inner
+
+    @_try_wrapper
     def _event_worker(self):
         # Gets events from the queue, embedds them, and writes them to the
         # volatile database.
-
         last_push = 0
         event = None
 
@@ -181,23 +192,21 @@ class Serializer(event_model.DocumentRouter):
                 # and returns the document, if embedder is full.
                 if event is not False:
                     event = self._event_embedder.insert(event)
-            try:
-                if (
-                        event is not None
-                        or event is False
-                        or do_push
-                        or time.monotonic() > last_push + self._MAX_INSERT):
-                    if not self._event_embedder.empty():
-                        event_dump = self._event_embedder.dump()
-                        self._bulkwrite_event(event_dump)
-                        for descriptor, event_page in event_dump.items():
-                            self._db_event_count['count_' + descriptor] += len(
-                                    event_page['seq_num'])
-                    last_push = time.monotonic()
-                    do_push = False
-            except BaseException as error:
-                self._worker_error = error
+            if (
+                    event is not None
+                    or event is False
+                    or do_push
+                    or time.monotonic() > (last_push + self._MAX_INSERT)):
+                if not self._event_embedder.empty():
+                    event_dump = self._event_embedder.dump()
+                    self._bulkwrite_event(event_dump)
+                    for descriptor, event_page in event_dump.items():
+                        self._db_event_count['count_' + descriptor] += len(
+                                event_page['seq_num'])
+                last_push = time.monotonic()
+                do_push = False
 
+    @_try_wrapper
     def _datum_worker(self):
         # Gets datum from the queue, embedds them, and writes them to the
         # volatile database.
@@ -220,24 +229,22 @@ class Serializer(event_model.DocumentRouter):
                 # and returns the document, if embedder is full.
                 if datum is not False:
                     datum = self._datum_embedder.insert(datum)
-            try:
-                if (
-                        datum is not None
-                        or datum is False
-                        or do_push
-                        or time.monotonic() > last_push + self._MAX_INSERT):
+            if (
+                    datum is not None
+                    or datum is False
+                    or do_push
+                    or time.monotonic() > (last_push + self._MAX_INSERT)):
 
-                    if not self._datum_embedder.empty():
-                        datum_dump = self._datum_embedder.dump()
-                        self._bulkwrite_datum(datum_dump)
-                        for resource, datum_page in datum_dump.items():
-                            self._db_datum_count['count_' + resource] += len(
-                                    datum_page['datum_id'])
-                    last_push = time.monotonic()
-                    do_push = False
-            except BaseException as error:
-                self._worker_error = error
+                if not self._datum_embedder.empty():
+                    datum_dump = self._datum_embedder.dump()
+                    self._bulkwrite_datum(datum_dump)
+                    for resource, datum_page in datum_dump.items():
+                        self._db_datum_count['count_' + resource] += len(
+                                datum_page['datum_id'])
+                last_push = time.monotonic()
+                do_push = False
 
+    @_try_wrapper
     def _count_worker(self):
         # Updates event_count and datum_count in the header document
 
@@ -245,26 +252,22 @@ class Serializer(event_model.DocumentRouter):
         last_datum_count = defaultdict(lambda: 0)
 
         while not self._frozen:
-            try:
-                time.sleep(5)
+            time.sleep(5)
 
-                # Only updates the header if the count has changed.
-                if (
-                        (sum(self._db_event_count.values()) >
-                         sum(last_event_count.values()))
-                        or (sum(self._db_datum_count.values()) >
-                            sum(last_datum_count.values()))
-                   ):
-                    self._volatile_db.header.update_one(
-                        {'run_id': self._run_uid},
-                        {'$set': {**dict(self._db_event_count),
-                                  **dict(self._db_datum_count)}})
+            # Only updates the header if the count has changed.
+            if (
+                    (sum(self._db_event_count.values()) >
+                     sum(last_event_count.values()))
+                    or (sum(self._db_datum_count.values()) >
+                        sum(last_datum_count.values()))
+               ):
+                self._volatile_db.header.update_one(
+                    {'run_id': self._run_uid},
+                    {'$set': {**dict(self._db_event_count),
+                              **dict(self._db_datum_count)}})
 
-                    last_event_count = self._db_event_count
-                    last_datum_count = self._db_datum_count
-            except BaseException as error:
-                self._datum_buffer.worker_error = error
-                self._event_buffer.worker_error = error
+                last_event_count = self._db_event_count
+                last_datum_count = self._db_datum_count
 
     def start(self, doc):
         self._check_start(doc)
@@ -275,9 +278,7 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def stop(self, doc):
-        self._insert_header('stop', doc)
-        self._event_queue.put(False)
-        self._datum_queue.put(False)
+        self._stop_doc = doc
         self.close()
         return doc
 
@@ -316,6 +317,10 @@ class Serializer(event_model.DocumentRouter):
         """
         # Freeze the serializer.
         self._frozen = True
+
+        self._event_queue.put(False)
+        self._datum_queue.put(False)
+
         self._count_executor.shutdown(wait=False)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
@@ -323,11 +328,17 @@ class Serializer(event_model.DocumentRouter):
         self._set_header('event_count', sum(self._event_count.values()))
         self._set_header('datum_count', sum(self._datum_count.values()))
 
+        if self._worker_error:
+            raise RuntimeError("Worker exception: ") from self._worker_error
+
         # Raise exception if buffers are not empty.
         assert self._event_queue.empty()
         assert self._datum_queue.empty()
         assert self._event_embedder.empty()
         assert self._datum_embedder.empty()
+
+        # Insert the stop doc.
+        self._insert_header('stop', self._stop_doc)
 
         # Copy the run to the permanent database.
         volatile_run = self._get_run(self._volatile_db, run_uid)
