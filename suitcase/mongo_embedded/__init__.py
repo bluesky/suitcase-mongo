@@ -312,9 +312,10 @@ class Serializer(event_model.DocumentRouter):
     def freeze(self, run_uid):
         """
         Freeze the run by flushing the buffers and moving all of the run's
-        documents to the permanent database. Can be used independantly to
-        freeze a previous run.
+        documents to the permanent database. This method checks that the data
+        has been transfered correcly, and then deletes the volatile data.
         """
+
         # Freeze the serializer.
         self._frozen = True
 
@@ -485,6 +486,46 @@ class Serializer(event_model.DocumentRouter):
         else:
             self._start_found = True
 
+
+    def explicit_freeze(self, run_uid):
+        """
+        Freeze the run by flushing the buffers and moving all of the run's
+        documents to the permanent database. This method is inteded to be used
+        if a run fails, and the freeze method is not called. This method can be
+        used to freeze a partial run.
+        """
+        # Freeze the serializer.
+        self._frozen = True
+
+        self._event_queue.put(False)
+        self._datum_queue.put(False)
+
+        self._count_executor.shutdown(wait=False)
+        self._event_executor.shutdown(wait=True)
+        self._datum_executor.shutdown(wait=True)
+
+        if self._worker_error:
+            raise RuntimeError("Worker exception: ") from self._worker_error
+
+        # Raise exception if buffers are not empty.
+        assert self._event_queue.empty()
+        assert self._datum_queue.empty()
+        assert self._event_embedder.empty()
+        assert self._datum_embedder.empty()
+
+        # Copy the run to the permanent database.
+        volatile_run = self._get_run(self._volatile_db, run_uid)
+        self._insert_run(self._permanent_db, volatile_run)
+        permanent_run = self._get_run(self._permanent_db, run_uid)
+
+        # Check that it has been copied correctly to permanent database, then
+        # delete the run from the volatile database.
+        if volatile_run != permanent_run:
+            raise IOError("Failed to move data to permanent database.")
+        else:
+            self._volatile_db.header.drop()
+            self._volatile_db.event.drop()
+            self._volatile_db.datum.drop()
 
 class Embedder():
 
