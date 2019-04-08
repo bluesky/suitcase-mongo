@@ -322,6 +322,8 @@ class Serializer(event_model.DocumentRouter):
         self._event_queue.put(False)
         self._datum_queue.put(False)
 
+        # No need to wait the 5 seconds for count_executor to finish because we
+        # update the final count after explicitly durring freeze.
         self._count_executor.shutdown(wait=False)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
@@ -500,6 +502,7 @@ class Serializer(event_model.DocumentRouter):
         self._event_queue.put(False)
         self._datum_queue.put(False)
 
+        
         self._count_executor.shutdown(wait=False)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
