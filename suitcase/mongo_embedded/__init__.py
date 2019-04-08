@@ -100,16 +100,16 @@ class Serializer(event_model.DocumentRouter):
         # There is no performace improvment for more than 10 threads. Tests
         # validate for upto 10 threads.
         if num_threads > 10 or num_threads < 1:
-            raise AttributeError(f"num_threads must be between 1 and 10"
+            raise ValueError(f"num_threads must be between 1 and 10"
                                  "inclusive.")
 
         if page_size < 1000:
-            raise AttributeError(f"page_size must be >= 1000")
+            raise ValueError(f"page_size must be >= 1000")
 
         # Maximum size of a document in mongo is 16MB. buffer_size + page_size
         # defines the biggest document that can be created.
         if embedder_size + page_size > 15000000:
-            raise AttributeError(f"embedder_size: {embedder_size} + page_size:"
+            raise ValueError(f"embedder_size: {embedder_size} + page_size:"
                                  "{page_size} is greater then 15000000.")
 
         self._QUEUE_SIZE = queue_size
@@ -572,7 +572,7 @@ class Embedder():
         if (max_size >= 1000) and (max_size <= 15000000):
             self._max_size = max_size
         else:
-            raise AttributeError(f"Invalid max_size {max_size}, "
+            raise ValueError(f"Invalid max_size {max_size}, "
                                  "max_size must be between 1000 and "
                                  "15000000 inclusive.")
 
@@ -587,7 +587,7 @@ class Embedder():
             self._dataframe_keys = set(["datum_kwargs"])
             self._stream_id_key = "resource"
         else:
-            raise AttributeError(f"Invalid doc_type {doc_type}, doc_type must "
+            raise ValueError(f"Invalid doc_type {doc_type}, doc_type must "
                                  "be either 'event' or 'datum'")
 
     def dump(self):
