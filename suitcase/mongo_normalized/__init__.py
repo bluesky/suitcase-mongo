@@ -39,6 +39,43 @@ class Serializer(event_model.DocumentRouter):
         self._metadatastore_db = mds_db
         self._asset_registry_db = assets_db
 
+        self._create_indexes()
+
+    def _create_indexes(self):
+        """
+        Create indexes on the various collections.
+
+        If the index already exists, this has no effect.
+        """
+        self._resource_collection.create_index('uid', unique=True)
+        self._resource_collection.create_index('resource_id')  # legacy
+        self._datum_collection.create_index('datum_id', unique=True)
+        self._datum_collection.create_index('resource')
+        self._run_start_collection.create_index(
+            [('uid', pymongo.DESCENDING)], unique=True)
+        self._run_start_collection.create_index(
+            [('time', pymongo.DESCENDING), ('scan_id', pymongo.DESCENDING)],
+            unique=False, background=True)
+        self._run_start_collection.create_index([("$**", "text")])
+        self._run_stop_collection.create_index('run_start', unique=True)
+        self._run_stop_collection.create_index('uid', unique=True)
+        self._run_stop_collection.create_index(
+            [('time', pymongo.DESCENDING)], unique=False, background=True)
+        self._run_stop_collection.create_index([("$**", "text")])
+        self._event_descriptor_collection.create_index(
+            [('uid', pymongo.DESCENDING)], unique=True)
+        self._event_descriptor_collection.create_index(
+            [('run_start', pymongo.DESCENDING), ('time', pymongo.DESCENDING)],
+            unique=False, background=True)
+        self._event_descriptor_collection.create_index(
+            [('time', pymongo.DESCENDING)], unique=False, background=True)
+        self._event_descriptor_collection.create_index([("$**", "text")])
+        self._event_collection.create_index(
+            [('uid', pymongo.DESCENDING)], unique=True)
+        self._event_collection.create_index(
+            [('descriptor', pymongo.DESCENDING), ('time', pymongo.ASCENDING)],
+            unique=False, background=True)
+
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
