@@ -3,9 +3,10 @@ from ._version import get_versions
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
-import threading
+from threading import Event
 import sys
 import time
+import queue
 
 __version__ = get_versions()['version']
 del get_versions
@@ -68,7 +69,8 @@ class Serializer(event_model.DocumentRouter):
     """
 
     def __init__(self, volatile_db, permanent_db, num_threads=1,
-                 buffer_size=1000000, page_size=5000000, **kwargs):
+                 queue_size=20, embedder_size=1000000, page_size=5000000,
+                 max_insert_time=10, **kwargs):
 
         """
         Insert documents into MongoDB using an embedded data model.
@@ -82,41 +84,52 @@ class Serializer(event_model.DocumentRouter):
         num_theads: int, optional
             number of workers that read from the buffer and write to the
             database. Must be 5 or less. Default is 1.
-        buffer_size: int, optional
-            maximum size of the buffers in bytes. buffer_size + page_size must
-            be less than 15000000. Default is 5000000
+        queue_size: int, optional
+            maximum size of the queue.
         page_size: int, optional
-            The document size for event_page and datum_page documents. The
-            maximum event/datum_page size is buffer_size + page_size.
-            buffer_size + page_size must be less than 15000000.The
+            the document size for event_page and datum_page documents. The
+            maximum event/datum_page size is embedder_size + page_size.
+            embedder_size + page_size must be less than 15000000.The
             default is 5000000.
+        embedder_size: int, optional
+            maximum size of the embedder
+        max_insert_time: int, optional
+            maximum time that the workers will wait before doing a database
+            insert.
         """
 
         # There is no performace improvment for more than 10 threads. Tests
         # validate for upto 10 threads.
         if num_threads > 10 or num_threads < 1:
-            raise AttributeError(f"num_threads must be between 1 and 10"
-                                 "inclusive.")
+            raise ValueError(f"num_threads must be between 1 and 10"
+                             "inclusive.")
 
         if page_size < 1000:
-            raise AttributeError(f"page_size must be >= 10000")
+            raise ValueError(f"page_size must be >= 1000")
 
         # Maximum size of a document in mongo is 16MB. buffer_size + page_size
         # defines the biggest document that can be created.
-        if buffer_size + page_size > 15000000:
-            raise AttributeError(f"buffer_size: {buffer_size} + page_size: "
-                                 "page_size} is greater then 15000000.")
+        if embedder_size + page_size > 15000000:
+            raise ValueError(f"embedder_size: {embedder_size} + page_size:"
+                             "{page_size} is greater then 15000000.")
 
-        self._BUFFER_SIZE = buffer_size
+        self._QUEUE_SIZE = queue_size
+        self._EMBED_SIZE = embedder_size
         self._PAGE_SIZE = page_size
+        self._MAX_INSERT = max_insert_time
         self._permanent_db = permanent_db
         self._volatile_db = volatile_db
-        self._event_buffer = DocBuffer('event', self._BUFFER_SIZE)
-        self._datum_buffer = DocBuffer('datum', self._BUFFER_SIZE)
+        self._event_queue = queue.Queue(maxsize=self._QUEUE_SIZE)
+        self._datum_queue = queue.Queue(maxsize=self._QUEUE_SIZE)
+        self._event_embedder = Embedder('event', self._EMBED_SIZE)
+        self._datum_embedder = Embedder('datum', self._EMBED_SIZE)
         self._kwargs = kwargs
         self._start_found = False
         self._run_uid = None
         self._frozen = False
+        self._count = Event()
+        self._worker_error = None
+        self._stop_doc = None
 
         # _event_count and _datum_count are used for setting first/last_index
         # fields of event and datum pages
@@ -140,34 +153,100 @@ class Serializer(event_model.DocumentRouter):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
         sanitized_doc = event_model.sanitize_doc(doc)
+        if self._worker_error:
+            raise RuntimeError("Worker exception: ") from self._worker_error
+        if self._frozen:
+            raise RuntimeError("Cannot insert documents into "
+                               "frozen Serializer.")
+
         return super().__call__(name, sanitized_doc)
 
+    def _try_wrapper(f):
+        from functools import wraps
+        @wraps(f)
+        def inner(self):
+            try:
+                f(self)
+            except Exception as error:
+                self._worker_error = error
+                raise
+        return inner
+
+    @_try_wrapper
     def _event_worker(self):
-        # Gets the event buffer and writes it to the volatile database.
-        while not self._frozen:
-            try:
-                event_dump = self._event_buffer.dump()
-                self._bulkwrite_event(event_dump)
-                for descriptor_uid, event_page in event_dump.items():
-                    self._db_event_count['count_' + descriptor_uid] += len(
-                                          event_page['seq_num'])
-            except BaseException as error:
-                self._datum_buffer.worker_error = error
-                self._event_buffer.worker_error = error
+        # Gets events from the queue, embedds them, and writes them to the
+        # volatile database.
+        last_push = 0
+        event = None
 
+        # When a stop document is received 'False' is pushed on to the
+        # queue, this signals the worker to finish.
+        while event is not False:
+            last_push = time.monotonic()
+            do_push = False
+            try:
+                if event is None:
+                    event = self._event_queue.get(timeout=0.5)
+            except queue.Empty:
+                do_push = True
+            else:
+                # embedder.insert() returns None if the document is inserted,
+                # and returns the document, if embedder is full.
+                if event is not False:
+                    event = self._event_embedder.insert(event)
+            if (
+                    event is not None
+                    or event is False
+                    or do_push
+                    or time.monotonic() > (last_push + self._MAX_INSERT)):
+                if not self._event_embedder.empty():
+                    event_dump = self._event_embedder.dump()
+                    self._bulkwrite_event(event_dump)
+                    for descriptor, event_page in event_dump.items():
+                        self._db_event_count['count_' + descriptor] += len(
+                                event_page['seq_num'])
+                last_push = time.monotonic()
+                do_push = False
+
+    @_try_wrapper
     def _datum_worker(self):
-        # Gets the datum buffer and writes it to the volatile database.
-        while not self._frozen:
-            try:
-                datum_dump = self._datum_buffer.dump()
-                self._bulkwrite_datum(datum_dump)
-                for resource_uid, datum_page in datum_dump.items():
-                    self._db_datum_count['count_' + resource_uid] += len(
-                                          datum_page['datum_id'])
-            except BaseException as error:
-                self._datum_buffer.worker_error = error
-                self._event_buffer.worker_error = error
+        # Gets datum from the queue, embedds them, and writes them to the
+        # volatile database.
 
+        last_push = 0
+        datum = None
+
+        # When a stop document is received 'False' is pushed on to the
+        # queue, this signals the worker to finish.
+        while datum is not False:
+            last_push = time.monotonic()
+            do_push = False
+            try:
+                if datum is None:
+                    datum = self._datum_queue.get(timeout=0.5)
+            except queue.Empty:
+                do_push = True
+            else:
+                # embedder.insert() returns None if the document is inserted,
+                # and returns the document, if embedder is full.
+                if datum is not False:
+                    datum = self._datum_embedder.insert(datum)
+            if (
+                    datum is not None
+                    or datum is False
+                    or do_push
+                    or time.monotonic() > (last_push + self._MAX_INSERT)):
+
+                if not self._datum_embedder.empty():
+                    datum_dump = self._datum_embedder.dump()
+                    self._bulkwrite_datum(datum_dump)
+                    for resource, datum_page in datum_dump.items():
+                        self._db_datum_count['count_' + resource] += len(
+                                datum_page['datum_id'])
+                last_push = time.monotonic()
+                do_push = False
+
+    @_try_wrapper
     def _count_worker(self):
         # Updates event_count and datum_count in the header document
 
@@ -175,26 +254,21 @@ class Serializer(event_model.DocumentRouter):
         last_datum_count = defaultdict(lambda: 0)
 
         while not self._frozen:
-            try:
-                time.sleep(5)
+            self._count.wait(timeout=5)
+            # Only updates the header if the count has changed.
+            if (
+                    (sum(self._db_event_count.values()) >
+                     sum(last_event_count.values()))
+                    or (sum(self._db_datum_count.values()) >
+                        sum(last_datum_count.values()))
+               ):
+                self._volatile_db.header.update_one(
+                    {'run_id': self._run_uid},
+                    {'$set': {**dict(self._db_event_count),
+                              **dict(self._db_datum_count)}})
 
-                # Only updates the header if the count has changed.
-                if (
-                        (sum(self._db_event_count.values()) >
-                         sum(last_event_count.values()))
-                        or (sum(self._db_datum_count.values()) >
-                            sum(last_datum_count.values()))
-                   ):
-                    self._volatile_db.header.update_one(
-                        {'run_id': self._run_uid},
-                        {'$set': {**dict(self._db_event_count),
-                                  **dict(self._db_datum_count)}})
-
-                    last_event_count = self._db_event_count
-                    last_datum_count = self._db_datum_count
-            except BaseException as error:
-                self._datum_buffer.worker_error = error
-                self._event_buffer.worker_error = error
+                last_event_count = self._db_event_count
+                last_datum_count = self._db_datum_count
 
     def start(self, doc):
         self._check_start(doc)
@@ -205,7 +279,7 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def stop(self, doc):
-        self._insert_header('stop', doc)
+        self._stop_doc = doc
         self.close()
         return doc
 
@@ -218,11 +292,11 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def event(self, doc):
-        self._event_buffer.insert(doc)
+        self._event_queue.put(doc)
         return doc
 
     def datum(self, doc):
-        self._datum_buffer.insert(doc)
+        self._datum_queue.put(doc)
         return doc
 
     def event_page(self, doc):
@@ -239,35 +313,37 @@ class Serializer(event_model.DocumentRouter):
     def freeze(self, run_uid):
         """
         Freeze the run by flushing the buffers and moving all of the run's
-        documents to the permanent database. Can be used independantly to
-        freeze a previous run.
+        documents to the permanent database. This method checks that the data
+        has been transfered correcly, and then deletes the volatile data.
         """
         # Freeze the serializer.
         self._frozen = True
+        self._event_queue.put(False)
+        self._datum_queue.put(False)
 
-        # Freeze the buffers.
-        self._event_buffer.freeze()
-        self._datum_buffer.freeze()
+        # Interupt the count worker sleep
+        self._count.set()
 
-        # Wait for the workers to finish.
-        self._count_executor.shutdown(wait=False)
+        # No need to wait the 5 seconds for count_executor to finish because we
+        # update the final count after explicitly durring freeze.
+        self._count_executor.shutdown(wait=True)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
-
-        # Flush the buffers if there is anything in them.
-        if self._event_buffer.current_size > 0:
-            event_dump = self._event_buffer.dump()
-            self._bulkwrite_event(event_dump)
-        if self._datum_buffer.current_size > 0:
-            datum_dump = self._datum_buffer.dump()
-            self._bulkwrite_datum(datum_dump)
 
         self._set_header('event_count', sum(self._event_count.values()))
         self._set_header('datum_count', sum(self._datum_count.values()))
 
+        if self._worker_error:
+            raise RuntimeError("Worker exception: ") from self._worker_error
+
         # Raise exception if buffers are not empty.
-        assert self._event_buffer.current_size == 0
-        assert self._datum_buffer.current_size == 0
+        assert self._event_queue.empty()
+        assert self._datum_queue.empty()
+        assert self._event_embedder.empty()
+        assert self._datum_embedder.empty()
+
+        # Insert the stop doc.
+        self._insert_header('stop', self._stop_doc)
 
         # Copy the run to the permanent database.
         volatile_run = self._get_run(self._volatile_db, run_uid)
@@ -280,7 +356,7 @@ class Serializer(event_model.DocumentRouter):
             raise IOError("Failed to move data to permanent database.")
         else:
             self._volatile_db.header.drop()
-            self._volatile_db.events.drop()
+            self._volatile_db.event.drop()
             self._volatile_db.datum.drop()
 
     def _get_run(self, db, run_uid):
@@ -414,12 +490,51 @@ class Serializer(event_model.DocumentRouter):
         else:
             self._start_found = True
 
+    def explicit_freeze(self, run_uid):
+        """
+        Freeze the run by flushing the buffers and moving all of the run's
+        documents to the permanent database. This method is inteded to be used
+        if a run fails, and the freeze method is not called. This method can be
+        used to freeze a partial run.
+        """
+        # Freeze the serializer.
+        self._frozen = True
 
-class DocBuffer():
+        self._event_queue.put(False)
+        self._datum_queue.put(False)
+
+        self._count_executor.shutdown(wait=False)
+        self._event_executor.shutdown(wait=True)
+        self._datum_executor.shutdown(wait=True)
+
+        if self._worker_error:
+            raise RuntimeError("Worker exception: ") from self._worker_error
+
+        # Raise exception if buffers are not empty.
+        assert self._event_queue.empty()
+        assert self._datum_queue.empty()
+        assert self._event_embedder.empty()
+        assert self._datum_embedder.empty()
+
+        # Copy the run to the permanent database.
+        volatile_run = self._get_run(self._volatile_db, run_uid)
+        self._insert_run(self._permanent_db, volatile_run)
+        permanent_run = self._get_run(self._permanent_db, run_uid)
+
+        # Check that it has been copied correctly to permanent database, then
+        # delete the run from the volatile database.
+        if volatile_run != permanent_run:
+            raise IOError("Failed to move data to permanent database.")
+        else:
+            self._volatile_db.header.drop()
+            self._volatile_db.event.drop()
+            self._volatile_db.datum.drop()
+
+
+class Embedder():
 
     """
-    DocBuffer is a thread-safe "embedding" buffer for bluesky event or datum
-    documents.
+    Embedder embeds normalized bluesky documents.
 
     "embedding" refers to combining multiple documents from a stream of
     documents into a single document, where the values of matching keys are
@@ -428,47 +543,42 @@ class DocBuffer():
     are defined by the bluesky event-model.
 
     Events with different descriptors, or datum with different resources are
-    stored in separate embedded documents in the buffer. The buffer uses a
-    defaultdict so new embedded documents are automatically created when they
-    are needed. The dump method totally clears the buffer. This mechanism
-    automatically manages the lifetime of the embeded documents in the buffer.
+    stored in separate embedded documents. Embedder uses a defaultdict so new
+    embedded documents are automatically created when they are needed. The dump
+    method returns the embedded dictionary. This mechanism manages the lifetime
+    of the event streams in the buffer.
 
     The doc_type argument which can be either 'event' or 'datum'.
     The the details of the embedding differ for event and datum documents.
 
-    Internally the buffer is a dictionary that maps event decriptors to
+    Internally the embedder is a dictionary that maps event decriptors to
     event_pages or datum resources to datum_pages.
 
     Parameters
     ----------
     doc_type: str
         {'event', 'datum'}
-    buffer_size: int, optional
-        Maximum buffer size in bytes.
+    max_size: int
+        Maximum embedder size in bytes.
 
     Attributes
     ----------
     current_size: int
-        Current size of the buffer.
+        Current size of the embedded documents.
 
     """
 
-    def __init__(self, doc_type, buffer_size):
-        self.worker_error = None
-        self._frozen = False
-        self._mutex = threading.Lock()
-        self._not_full = threading.Condition(self._mutex)
-        self._not_empty = threading.Condition(self._mutex)
-        self._doc_buffer = defaultdict(lambda: defaultdict(lambda:
-                                                           defaultdict(list)))
+    def __init__(self, doc_type, max_size):
+        self._embedder = defaultdict(lambda: defaultdict(lambda:
+                                                         defaultdict(list)))
         self.current_size = 0
 
-        if (buffer_size >= 400) and (buffer_size <= 15000000):
-            self._buffer_size = buffer_size
+        if (max_size >= 1000) and (max_size <= 15000000):
+            self._max_size = max_size
         else:
-            raise AttributeError(f"Invalid buffer_size {buffer_size}, "
-                                 "buffer_size must be between 10000 and "
-                                 "15000000 inclusive.")
+            raise ValueError(f"Invalid max_size {max_size}, "
+                             "max_size must be between 1000 and "
+                             "15000000 inclusive.")
 
         # Event docs and datum docs are embedded differently, this configures
         # the buffer for the specified document type.
@@ -481,88 +591,56 @@ class DocBuffer():
             self._dataframe_keys = set(["datum_kwargs"])
             self._stream_id_key = "resource"
         else:
-            raise AttributeError(f"Invalid doc_type {doc_type}, doc_type must "
-                                 "be either 'event' or 'datum'")
+            raise ValueError(f"Invalid doc_type {doc_type}, doc_type must "
+                             "be either 'event' or 'datum'")
+
+    def dump(self):
+        """
+        Get everything that has been embedded  and clear the buffer.
+
+        Returns
+        -------
+        embedder_dump: dict
+            A dictionary that maps event descriptor to event_page, or a
+            dictionary that maps datum resource to datum_page.
+        """
+        # Get a reference to the current dict, create a new dict.
+        embedder_dump = self._embedder
+        self._embedder = defaultdict(lambda: defaultdict(lambda:
+                                                         defaultdict(list)))
+        self.current_size = 0
+        return embedder_dump
 
     def insert(self, doc):
         """
-        Inserts a bluesky event or datum document into buffer. This method
-        blocks if the buffer is full.
-
+        Embeds a bluesky event or datum document.
         Parameters
         ----------
         doc: json
             A validated bluesky event or datum document.
-        """
-
-        if self.worker_error:
-            raise RuntimeError("Worker exception: " + str(self.worker_error))
-
-        if self._frozen:
-            raise RuntimeError("Cannot insert documents into a "
-                               "frozen DocBuffer")
-
-        doc_size = sys.getsizeof(doc)
-
-        if doc_size >= self._buffer_size:
-            raise RuntimeError("Failed to insert. Document size is greater "
-                               "than max buffer size")
-
-        # Block if buffer is full.
-        with self._not_full:
-            self._not_full.wait_for(lambda: (self.current_size + doc_size)
-                                    < self._buffer_size)
-            self._buffer_insert(doc)
-            self.current_size += doc_size
-            # Wakes up threads that are waiting to dump.
-            self._not_empty.notify_all()
-
-    def dump(self):
-        """
-        Get everything in the buffer and clear the buffer.  This method blocks
-        if the buffer is empty.
-
         Returns
         -------
-        doc_buffer_dump: dict
-            A dictionary that maps event descriptor to event_page, or a
-            dictionary that maps datum resource to datum_page.
+        result: bool
+            True if insert is successful, False if it failed.
         """
-        # Block if the buffer is empty.
-        # Don't block if the buffer is frozen, this allows all workers threads
-        # finish when freezing the run.
-        with self._not_empty:
-            self._not_empty.wait_for(lambda: (
-                                self.current_size or self._frozen))
-            # Get a reference to the current buffer, create a new buffer.
-            doc_buffer_dump = self._doc_buffer
-            self._doc_buffer = defaultdict(lambda:
-                                           defaultdict(lambda:
-                                                       defaultdict(list)))
-            self.current_size = 0
-            # Wakes up all threads that are waiting to insert.
-            self._not_full.notify_all()
-            return doc_buffer_dump
+        doc_size = sys.getsizeof(doc)
+        if (self.current_size + doc_size) > self._max_size:
+            return doc
 
-    def _buffer_insert(self, doc):
-        # Embed the doc in the buffer
         for key, value in doc.items():
             if key in self._array_keys:
-                self._doc_buffer[doc[self._stream_id_key]][key] = list(
-                    self._doc_buffer[doc[self._stream_id_key]][key])
-                self._doc_buffer[doc[self._stream_id_key]][key].append(value)
+                self._embedder[doc[self._stream_id_key]][key] = list(
+                    self._embedder[doc[self._stream_id_key]][key])
+                self._embedder[doc[self._stream_id_key]][key].append(value)
             elif key in self._dataframe_keys:
                 for inner_key, inner_value in doc[key].items():
-                    (self._doc_buffer[doc[self._stream_id_key]][key]
+                    (self._embedder[doc[self._stream_id_key]][key]
                         [inner_key].append(inner_value))
             else:
-                self._doc_buffer[doc[self._stream_id_key]][key] = value
+                self._embedder[doc[self._stream_id_key]][key] = value
 
-    def freeze(self):
-        """
-        Freeze the buffer preventing new inserts and stop dump from blocking
-        """
-        self._frozen = True
-        self._mutex.acquire()
-        self._not_empty.notify_all()
-        self._mutex.release()
+        self.current_size += doc_size
+        return None
+
+    def empty(self):
+        return not self.current_size
