@@ -3,6 +3,7 @@ from ._version import get_versions
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
+from threading import Event
 import sys
 import time
 import queue
@@ -126,6 +127,7 @@ class Serializer(event_model.DocumentRouter):
         self._start_found = False
         self._run_uid = None
         self._frozen = False
+        self._count = Event()
         self._worker_error = None
         self._stop_doc = None
 
@@ -185,6 +187,7 @@ class Serializer(event_model.DocumentRouter):
             try:
                 if event is None:
                     event = self._event_queue.get(timeout=0.5)
+                    print(event)
             except queue.Empty:
                 do_push = True
             else:
@@ -252,8 +255,8 @@ class Serializer(event_model.DocumentRouter):
         last_datum_count = defaultdict(lambda: 0)
 
         while not self._frozen:
-            time.sleep(5)
-
+            self._count.wait(timeout=5)
+            print("count")
             # Only updates the header if the count has changed.
             if (
                     (sum(self._db_event_count.values()) >
@@ -291,6 +294,7 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def event(self, doc):
+        #print("event", doc)
         self._event_queue.put(doc)
         return doc
 
@@ -315,16 +319,18 @@ class Serializer(event_model.DocumentRouter):
         documents to the permanent database. This method checks that the data
         has been transfered correcly, and then deletes the volatile data.
         """
-
+        print("Freeze!")
         # Freeze the serializer.
         self._frozen = True
-
         self._event_queue.put(False)
         self._datum_queue.put(False)
 
+        # Interupt the count worker sleep
+        self._count.set()
+
         # No need to wait the 5 seconds for count_executor to finish because we
         # update the final count after explicitly durring freeze.
-        self._count_executor.shutdown(wait=False)
+        self._count_executor.shutdown(wait=True)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
 

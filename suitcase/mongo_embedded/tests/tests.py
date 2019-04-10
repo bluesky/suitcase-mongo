@@ -14,6 +14,8 @@ def test_export(db_factory, example_data):
     permanent_db = db_factory()
     serializer = Serializer(volatile_db, permanent_db)
     run(example_data, serializer, permanent_db)
+    if not serializer._frozen:
+        serializer.close()
 
 
 def test_multithread(db_factory, example_data):
@@ -24,6 +26,8 @@ def test_multithread(db_factory, example_data):
     permanent_db = db_factory()
     serializer = Serializer(volatile_db, permanent_db, num_threads=5)
     run(example_data, serializer, permanent_db)
+    if not serializer._frozen:
+        serializer.close()
 
 
 def test_smallbuffer(db_factory, example_data):
@@ -34,6 +38,8 @@ def test_smallbuffer(db_factory, example_data):
     permanent_db = db_factory()
     serializer = Serializer(volatile_db, permanent_db, embedder_size=1000)
     run(example_data, serializer, permanent_db)
+    if not serializer._frozen:
+        serializer.close()
 
 
 def test_smallqueue(db_factory, example_data):
@@ -44,6 +50,8 @@ def test_smallqueue(db_factory, example_data):
     permanent_db = db_factory()
     serializer = Serializer(volatile_db, permanent_db, queue_size=1)
     run(example_data, serializer, permanent_db)
+    if not serializer._frozen:
+        serializer.close()
 
 
 def test_smallpage(db_factory, example_data):
@@ -54,6 +62,8 @@ def test_smallpage(db_factory, example_data):
     permanent_db = db_factory()
     serializer = Serializer(volatile_db, permanent_db, page_size=10000)
     run(example_data, serializer, permanent_db)
+    if not serializer._frozen:
+        serializer.close()
 
 
 def test_evil_db(db_factory, example_data):
@@ -71,6 +81,8 @@ def test_evil_db(db_factory, example_data):
     serializer._bulkwrite_datum = evil_func
     with pytest.raises(RuntimeError):
         run(example_data, serializer, permanent_db)
+    if not serializer._frozen:
+        serializer.close()
 
 
 def run(example_data, serializer, permanent_db):
