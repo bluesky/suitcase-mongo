@@ -101,7 +101,7 @@ class Serializer(event_model.DocumentRouter):
         # validate for upto 10 threads.
         if num_threads > 10 or num_threads < 1:
             raise ValueError(f"num_threads must be between 1 and 10"
-                                 "inclusive.")
+                             "inclusive.")
 
         if page_size < 1000:
             raise ValueError(f"page_size must be >= 1000")
@@ -110,7 +110,7 @@ class Serializer(event_model.DocumentRouter):
         # defines the biggest document that can be created.
         if embedder_size + page_size > 15000000:
             raise ValueError(f"embedder_size: {embedder_size} + page_size:"
-                                 "{page_size} is greater then 15000000.")
+                             "{page_size} is greater then 15000000.")
 
         self._QUEUE_SIZE = queue_size
         self._EMBED_SIZE = embedder_size
@@ -488,7 +488,6 @@ class Serializer(event_model.DocumentRouter):
         else:
             self._start_found = True
 
-
     def explicit_freeze(self, run_uid):
         """
         Freeze the run by flushing the buffers and moving all of the run's
@@ -502,7 +501,6 @@ class Serializer(event_model.DocumentRouter):
         self._event_queue.put(False)
         self._datum_queue.put(False)
 
-        
         self._count_executor.shutdown(wait=False)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
@@ -529,6 +527,7 @@ class Serializer(event_model.DocumentRouter):
             self._volatile_db.header.drop()
             self._volatile_db.event.drop()
             self._volatile_db.datum.drop()
+
 
 class Embedder():
 
@@ -576,8 +575,8 @@ class Embedder():
             self._max_size = max_size
         else:
             raise ValueError(f"Invalid max_size {max_size}, "
-                                 "max_size must be between 1000 and "
-                                 "15000000 inclusive.")
+                             "max_size must be between 1000 and "
+                             "15000000 inclusive.")
 
         # Event docs and datum docs are embedded differently, this configures
         # the buffer for the specified document type.
@@ -591,7 +590,7 @@ class Embedder():
             self._stream_id_key = "resource"
         else:
             raise ValueError(f"Invalid doc_type {doc_type}, doc_type must "
-                                 "be either 'event' or 'datum'")
+                             "be either 'event' or 'datum'")
 
     def dump(self):
         """
