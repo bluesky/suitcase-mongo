@@ -187,7 +187,6 @@ class Serializer(event_model.DocumentRouter):
             try:
                 if event is None:
                     event = self._event_queue.get(timeout=0.5)
-                    print(event)
             except queue.Empty:
                 do_push = True
             else:
@@ -256,7 +255,6 @@ class Serializer(event_model.DocumentRouter):
 
         while not self._frozen:
             self._count.wait(timeout=5)
-            print("count")
             # Only updates the header if the count has changed.
             if (
                     (sum(self._db_event_count.values()) >
@@ -294,7 +292,6 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def event(self, doc):
-        #print("event", doc)
         self._event_queue.put(doc)
         return doc
 
@@ -319,7 +316,6 @@ class Serializer(event_model.DocumentRouter):
         documents to the permanent database. This method checks that the data
         has been transfered correcly, and then deletes the volatile data.
         """
-        print("Freeze!")
         # Freeze the serializer.
         self._frozen = True
         self._event_queue.put(False)
