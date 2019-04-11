@@ -368,7 +368,7 @@ class Serializer(event_model.DocumentRouter):
         # Get the header.
         header = db.header.find_one({'run_id': run_uid}, {'_id': False})
         if header is None:
-            raise RuntimeError(f"Run not found {run_uid}")
+            raise RuntimeError(f"Run not found {run_uid} in volatile_db.")
 
         run.append(('header', header))
 
