@@ -4,9 +4,9 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
 from threading import Event
-import sys
 import time
 import queue
+import bson
 
 __version__ = get_versions()['version']
 del get_versions
@@ -200,8 +200,8 @@ class Serializer(event_model.DocumentRouter):
                     or do_push
                     or time.monotonic() > (last_push + self._MAX_INSERT)):
                 if not self._event_embedder.empty():
-                    event_dump = self._event_embedder.dump()
-                    self._bulkwrite_event(event_dump)
+                    event_dump, dump_sizes = self._event_embedder.dump()
+                    self._bulkwrite_event(event_dump, dump_sizes)
                     for descriptor, event_page in event_dump.items():
                         self._db_event_count['count_' + descriptor] += len(
                                 event_page['seq_num'])
@@ -238,8 +238,8 @@ class Serializer(event_model.DocumentRouter):
                     or time.monotonic() > (last_push + self._MAX_INSERT)):
 
                 if not self._datum_embedder.empty():
-                    datum_dump = self._datum_embedder.dump()
-                    self._bulkwrite_datum(datum_dump)
+                    datum_dump, dump_sizes = self._datum_embedder.dump()
+                    self._bulkwrite_datum(datum_dump. dump_sizes)
                     for resource, datum_page in datum_dump.items():
                         self._db_datum_count['count_' + resource] += len(
                                 datum_page['datum_id'])
@@ -411,27 +411,29 @@ class Serializer(event_model.DocumentRouter):
         self._volatile_db.header.update_one({'run_id': self._run_uid},
                                             {'$set': {name: doc}})
 
-    def _bulkwrite_datum(self, datum_buffer):
+    def _bulkwrite_datum(self, datum_buffer, dump_sizes):
         """
         Bulk writes datum_pages to Mongo datum collection.
         """
-        operations = [self._updateone_datumpage(resource, datum_page)
+        operations = [self._updateone_datumpage(resource, datum_page,
+                                                dump_sizes[resource])
                       for resource, datum_page in datum_buffer.items()]
         self._volatile_db.datum.bulk_write(operations, ordered=False)
 
-    def _bulkwrite_event(self, event_buffer):
+    def _bulkwrite_event(self, event_buffer, dump_sizes):
         """
         Bulk writes event_pages to Mongo event collection.
         """
-        operations = [self._updateone_eventpage(descriptor, event_page)
+        operations = [self._updateone_eventpage(descriptor, event_page,
+                                                dump_sizes[descriptor])
                       for descriptor, event_page in event_buffer.items()]
         self._volatile_db.event.bulk_write(operations, ordered=False)
 
-    def _updateone_eventpage(self, descriptor_id, event_page):
+    def _updateone_eventpage(self, descriptor_id, event_page, size):
         """
         Creates the UpdateOne command that gets used with bulk_write.
         """
-        event_size = sys.getsizeof(event_page)
+        event_size = size
 
         data_string = {'data.' + key: {'$each': value_array}
                        for key, value_array in event_page['data'].items()}
@@ -459,11 +461,11 @@ class Serializer(event_model.DocumentRouter):
              '$max': {'last_index': self._event_count[descriptor_id] - 1}},
             upsert=True)
 
-    def _updateone_datumpage(self, resource_id, datum_page):
+    def _updateone_datumpage(self, resource_id, datum_page, size):
         """
         Creates the UpdateOne command that gets used with bulk_write.
         """
-        datum_size = sys.getsizeof(datum_page)
+        datum_size = size
 
         kwargs_string = {'datum_kwargs.' + key: {'$each': value_array}
                          for key, value_array
@@ -572,6 +574,7 @@ class Embedder():
         self._embedder = defaultdict(lambda: defaultdict(lambda:
                                                          defaultdict(list)))
         self.current_size = 0
+        self.stream_size = defaultdict(lambda: 0)
 
         if (max_size >= 1000) and (max_size <= 15000000):
             self._max_size = max_size
@@ -608,8 +611,10 @@ class Embedder():
         embedder_dump = self._embedder
         self._embedder = defaultdict(lambda: defaultdict(lambda:
                                                          defaultdict(list)))
+        dump_sizes = dict(self.stream_size)
+        self.stream_size = defaultdict(lambda: 0)
         self.current_size = 0
-        return embedder_dump
+        return embedder_dump, dump_sizes
 
     def insert(self, doc):
         """
@@ -623,7 +628,7 @@ class Embedder():
         result: bool
             True if insert is successful, False if it failed.
         """
-        doc_size = sys.getsizeof(doc)
+        doc_size = len(bson.BSON.encode(doc))
         if (self.current_size + doc_size) > self._max_size:
             return doc
 
@@ -640,6 +645,7 @@ class Embedder():
                 self._embedder[doc[self._stream_id_key]][key] = value
 
         self.current_size += doc_size
+        self.stream_size[doc[self._stream_id_key]] += doc_size
         return None
 
     def empty(self):
