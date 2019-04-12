@@ -2,7 +2,7 @@ import event_model
 from ._version import get_versions
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from pymongo import UpdateOne, WriteConcern
+from pymongo import UpdateOne
 from threading import Event
 import time
 import queue
@@ -300,11 +300,15 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def event_page(self, doc):
-        self._bulkwrite_event({doc['descriptor']: doc})
+        doc_size = len(bson.BSON.encode(doc))
+        self._bulkwrite_event({doc['descriptor']: doc},
+                              {doc['descriptor']: doc_size})
         return doc
 
     def datum_page(self, doc):
-        self._bulkwrite_datum({doc['resource']: doc})
+        doc_size = len(bson.BSON.encode(doc))
+        self._bulkwrite_datum({doc['resource']: doc},
+                              {doc['resource']: doc_size})
         return doc
 
     def close(self):
@@ -377,7 +381,6 @@ class Serializer(event_model.DocumentRouter):
         # Delete the header.
         self._volatile_db.header.remove({'run_id': run_uid})
 
-
     def _get_run(self, db, run_uid):
         """
         Gets a run from a database. Returns a list of the run's documents.
@@ -424,7 +427,7 @@ class Serializer(event_model.DocumentRouter):
                                             upsert=True)
 
     def _set_header(self, name,  doc):
-        """ 
+        """
         Inserts header document into the run's header document.
         """
         self._volatile_db.header.update_one({'run_id': self._run_uid},
@@ -648,6 +651,12 @@ class Embedder():
             True if insert is successful, False if it failed.
         """
         doc_size = len(bson.BSON.encode(doc))
+        if doc_size > self._max_size:
+            raise ValueError(f"Document size is too large to fit in the "
+                             f"embedder. doc_size={doc_size}, "
+                             f"embedder_size={self._max_size}, "
+                             f"doc_uid={doc['uid']}")
+
         if (self.current_size + doc_size) > self._max_size:
             return doc
 

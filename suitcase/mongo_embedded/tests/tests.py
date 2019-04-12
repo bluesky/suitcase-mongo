@@ -36,7 +36,7 @@ def test_smallbuffer(db_factory, example_data):
     """
     volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db, embedder_size=1000)
+    serializer = Serializer(volatile_db, permanent_db, embedder_size=3000)
     run(example_data, serializer, permanent_db)
     if not serializer._frozen:
         serializer.close()
