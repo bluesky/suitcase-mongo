@@ -2,7 +2,7 @@ import event_model
 from ._version import get_versions
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
-from pymongo import UpdateOne
+from pymongo import UpdateOne, WriteConcern
 from threading import Event
 import time
 import queue
@@ -355,9 +355,28 @@ class Serializer(event_model.DocumentRouter):
         if volatile_run != permanent_run:
             raise IOError("Failed to move data to permanent database.")
         else:
-            self._volatile_db.header.drop()
-            self._volatile_db.event.drop()
-            self._volatile_db.datum.drop()
+            self._delete_run(self._volatile_db, run_uid)
+
+    def _delete_run(self, db, run_uid):
+
+        # Get the header.
+        header = db.header.find_one({'run_id': run_uid}, {'_id': False})
+        if header is None:
+            raise RuntimeError(f"Cannot delete run, run not found {run_uid}.")
+
+        # Delete the events.
+        if 'descriptors' in header.keys():
+            for descriptor in header['descriptors']:
+                db.event.remove({'descriptor': descriptor['uid']})
+
+        # Delete the datum.
+        if 'resources' in header.keys():
+            for resource in header['resources']:
+                db.datum.remove({'resource': resource['uid']})
+
+        # Delete the header.
+        self._volatile_db.header.remove({'run_id': run_uid})
+
 
     def _get_run(self, db, run_uid):
         """
@@ -405,7 +424,7 @@ class Serializer(event_model.DocumentRouter):
                                             upsert=True)
 
     def _set_header(self, name,  doc):
-        """
+        """ 
         Inserts header document into the run's header document.
         """
         self._volatile_db.header.update_one({'run_id': self._run_uid},
