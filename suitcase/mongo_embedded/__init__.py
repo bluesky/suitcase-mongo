@@ -152,7 +152,7 @@ class Serializer(event_model.DocumentRouter):
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
-        sanitized_doc = event_model.sanitize_doc(doc)
+        sanitized_doc = event_model.sanitize_np(doc)
         if self._worker_error:
             raise RuntimeError("Worker exception: ") from self._worker_error
         if self._frozen:

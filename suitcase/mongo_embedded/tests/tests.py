@@ -101,7 +101,6 @@ def run(example_data, serializer, permanent_db):
 
         # Fix formatting for JSON.
         item = event_model.sanitize_doc(item)
-
         # Send the bluesky doc to the serializer
         mongo_serializer(*item)
 
