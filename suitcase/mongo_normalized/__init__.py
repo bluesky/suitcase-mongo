@@ -18,6 +18,11 @@ class Serializer(event_model.DocumentRouter):
         Note that this Seralizer does not share the standard Serializer
         name or signature common to suitcase packages because it can only write
         via pymongo, not to an arbitrary user-provided buffer.
+
+        Parameters
+        ----------
+        metadatastore_db : pymongo.Database or URI
+        asset_registry_db : pymongo.Database or URI
         """
         if isinstance(metadatastore_db, str):
             mds_db = _get_database(metadatastore_db)
