@@ -10,9 +10,8 @@ def test_export(db_factory, example_data):
     """
     Test suitcase-mongo-embedded serializer with default parameters.
     """
-    volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db)
+    serializer = Serializer(permanent_db)
     run(example_data, serializer, permanent_db)
     if not serializer._frozen:
         serializer.close()
@@ -22,9 +21,8 @@ def test_multithread(db_factory, example_data):
     """
     Test suitcase-mongo-embedded serializer with multiple worker threads.
     """
-    volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db, num_threads=5)
+    serializer = Serializer(permanent_db, num_threads=5)
     run(example_data, serializer, permanent_db)
     if not serializer._frozen:
         serializer.close()
@@ -34,9 +32,8 @@ def test_smallbuffer(db_factory, example_data):
     """
     Test suitcase-mongo-embedded serializer with a small buffer.
     """
-    volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db, embedder_size=3000)
+    serializer = Serializer(permanent_db, embedder_size=3000)
     run(example_data, serializer, permanent_db)
     if not serializer._frozen:
         serializer.close()
@@ -46,9 +43,8 @@ def test_smallqueue(db_factory, example_data):
     """
     Test suitcase-mongo-embedded serializer with a small buffer.
     """
-    volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db, queue_size=1)
+    serializer = Serializer(permanent_db, queue_size=1)
     run(example_data, serializer, permanent_db)
     if not serializer._frozen:
         serializer.close()
@@ -58,9 +54,8 @@ def test_smallpage(db_factory, example_data):
     """
     Test suitcase-mongo-embedded serializer with a small mongo page saize.
     """
-    volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db, page_size=10000)
+    serializer = Serializer(permanent_db, page_size=10000)
     run(example_data, serializer, permanent_db)
     if not serializer._frozen:
         serializer.close()
@@ -74,9 +69,8 @@ def test_evil_db(db_factory, example_data):
     def evil_func(*args, **kwargs):
         raise RuntimeError
 
-    volatile_db = db_factory()
     permanent_db = db_factory()
-    serializer = Serializer(volatile_db, permanent_db)
+    serializer = Serializer(permanent_db)
     serializer._bulkwrite_event = evil_func
     serializer._bulkwrite_datum = evil_func
     with pytest.raises(RuntimeError):
