@@ -352,14 +352,14 @@ class Serializer(event_model.DocumentRouter):
         # Copy the run to the permanent database.
         volatile_run = self._get_run(self._volatile_db, run_uid)
         self._insert_run(self._permanent_db, volatile_run)
-        permanent_run = self._get_run(self._permanent_db, run_uid)
+        #permanent_run = self._get_run(self._permanent_db, run_uid)
 
         # Check that it has been copied correctly to permanent database, then
         # delete the run from the volatile database.
-        if volatile_run != permanent_run:
-            raise IOError("Failed to move data to permanent database.")
-        else:
-            self._delete_run(self._volatile_db, run_uid)
+        #if volatile_run != permanent_run:
+        #    raise IOError("Failed to move data to permanent database.")
+        #else:
+        self._delete_run(self._volatile_db, run_uid)
 
     def _delete_run(self, db, run_uid):
 
