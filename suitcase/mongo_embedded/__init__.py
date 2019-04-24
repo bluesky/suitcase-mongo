@@ -148,12 +148,12 @@ class Serializer(event_model.DocumentRouter):
         self._db.header.create_index(
             [('start.time', pymongo.DESCENDING), ('start.scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
-        #self._db.header.create_index([("start.$**", "text")])
+        self._db.header.create_index([("$**", "text")])
         self._db.header.create_index('stop.run_start', unique=True)
         self._db.header.create_index('stop.uid', unique=True)
         self._db.header.create_index(
             [('stop.time', pymongo.DESCENDING)], unique=False, background=True)
-        #self._db.header.create_index([("stop.$**", "text")])
+        #self._db.header.create_index([("$**", "text")])
         self._db.header.create_index(
             [('descriptors.uid', pymongo.DESCENDING)], unique=True)
         self._db.header.create_index(
@@ -161,7 +161,7 @@ class Serializer(event_model.DocumentRouter):
             unique=False, background=True)
         self._db.header.create_index(
             [('descriptors.time', pymongo.DESCENDING)], unique=False, background=True)
-        #self._db.header.create_index([("descriptors.$**", "text")])
+        #self._db.header.create_index([("$**", "text")])
         self._db.event.create_index(
             [('uid', pymongo.DESCENDING)], unique=True)
         self._db.event.create_index(
