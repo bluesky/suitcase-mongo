@@ -57,9 +57,9 @@ class Serializer(event_model.DocumentRouter):
     >>> RE(scan([det], motor, 1, 10, 10))
     """
 
-    def __init__(self, db, num_threads=1, queue_size=20,
+    def __init__(self, db, num_threads=1, queue_size=100,
                  embedder_size=1000000, page_size=5000000,
-                 max_insert_time=10, **kwargs):
+                 max_insert_time=5, **kwargs):
 
         """
         Insert documents into MongoDB using an embedded data model.
@@ -146,26 +146,28 @@ class Serializer(event_model.DocumentRouter):
         self._db.header.create_index(
             [('start.uid', pymongo.DESCENDING)], unique=True)
         self._db.header.create_index(
-            [('start.time', pymongo.DESCENDING), ('start.scan_id', pymongo.DESCENDING)],
+            [('start.time', pymongo.DESCENDING),
+             ('start.scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
         self._db.header.create_index([("$**", "text")])
         self._db.header.create_index('stop.run_start', unique=True)
         self._db.header.create_index('stop.uid', unique=True)
         self._db.header.create_index(
             [('stop.time', pymongo.DESCENDING)], unique=False, background=True)
-        #self._db.header.create_index([("$**", "text")])
         self._db.header.create_index(
             [('descriptors.uid', pymongo.DESCENDING)], unique=True)
         self._db.header.create_index(
-            [('descriptors.run_start', pymongo.DESCENDING), ('time', pymongo.DESCENDING)],
+            [('descriptors.run_start', pymongo.DESCENDING),
+             ('time', pymongo.DESCENDING)],
             unique=False, background=True)
         self._db.header.create_index(
-            [('descriptors.time', pymongo.DESCENDING)], unique=False, background=True)
-        #self._db.header.create_index([("$**", "text")])
+            [('descriptors.time', pymongo.DESCENDING)],
+            unique=False, background=True)
         self._db.event.create_index(
             [('uid', pymongo.DESCENDING)], unique=True)
         self._db.event.create_index(
-            [('descriptor', pymongo.DESCENDING), ('time.0', pymongo.ASCENDING)],
+            [('descriptor', pymongo.DESCENDING),
+             ('time.0', pymongo.ASCENDING)],
             unique=False, background=True)
         self._db.datum.create_index('datum_id', unique=True)
         self._db.datum.create_index('resource')
@@ -173,7 +175,7 @@ class Serializer(event_model.DocumentRouter):
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
-        sanitized_doc = event_model.sanitize_np(doc)
+        sanitized_doc = event_model.sanitize_doc(doc)
         if self._worker_error:
             raise RuntimeError("Worker exception: ") from self._worker_error
         if self._frozen:
@@ -207,7 +209,7 @@ class Serializer(event_model.DocumentRouter):
             do_push = False
             try:
                 if event is None:
-                    event = self._event_queue.get(timeout=0.5)
+                    event = self._event_queue.get(timeout=0.2)
             except queue.Empty:
                 do_push = True
             else:
@@ -244,7 +246,7 @@ class Serializer(event_model.DocumentRouter):
             do_push = False
             try:
                 if datum is None:
-                    datum = self._datum_queue.get(timeout=0.5)
+                    datum = self._datum_queue.get(timeout=0.2)
             except queue.Empty:
                 do_push = True
             else:
@@ -368,21 +370,20 @@ class Serializer(event_model.DocumentRouter):
         # Insert the stop doc.
         self._insert_header('stop', self._stop_doc)
 
-
     def _insert_header(self, name,  doc):
         """
         Inserts header document into the run's header document.
         """
         self._db.header.update_one({'run_id': self._run_uid},
-                                            {'$push': {name: doc}},
-                                            upsert=True)
+                                   {'$push': {name: doc}},
+                                   upsert=True)
 
     def _set_header(self, name,  doc):
         """
         Inserts header document into the run's header document.
         """
         self._db.header.update_one({'run_id': self._run_uid},
-                                            {'$set': {name: doc}})
+                                   {'$set': {name: doc}})
 
     def _bulkwrite_datum(self, datum_buffer, dump_sizes):
         """
