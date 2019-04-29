@@ -103,6 +103,7 @@ class Serializer(event_model.DocumentRouter):
         self._EMBED_SIZE = embedder_size
         self._PAGE_SIZE = page_size
         self._MAX_INSERT = max_insert_time
+        self._QUEUE_TIMEOUT = 0.2
         self._db = db
         self._event_queue = queue.Queue(maxsize=self._QUEUE_SIZE)
         self._datum_queue = queue.Queue(maxsize=self._QUEUE_SIZE)
@@ -210,7 +211,7 @@ class Serializer(event_model.DocumentRouter):
             do_push = False
             try:
                 if event is None:
-                    event = self._event_queue.get(timeout=0.2)
+                    event = self._event_queue.get(timeout=self._QUEUE_TIMEOUT)
             except queue.Empty:
                 do_push = True
             else:
@@ -247,7 +248,7 @@ class Serializer(event_model.DocumentRouter):
             do_push = False
             try:
                 if datum is None:
-                    datum = self._datum_queue.get(timeout=0.2)
+                    datum = self._datum_queue.get(timeout=self._QUEUE_TIMEOUT)
             except queue.Empty:
                 do_push = True
             else:
