@@ -264,7 +264,7 @@ class Serializer(event_model.DocumentRouter):
 
                 if not self._datum_embedder.empty():
                     datum_dump, dump_sizes = self._datum_embedder.dump()
-                    self._bulkwrite_datum(datum_dump. dump_sizes)
+                    self._bulkwrite_datum(datum_dump, dump_sizes)
                     for resource, datum_page in datum_dump.items():
                         self._db_datum_count['count_' + resource] += len(
                                 datum_page['datum_id'])
