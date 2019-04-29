@@ -141,21 +141,22 @@ class Serializer(event_model.DocumentRouter):
         Create indexes on the various collections.
          If the index already exists, this has no effect.
         """
-        self._db.header.create_index('resorces.uid', unique=True)
+        self._db.header.create_index('resources.uid', unique=True, sparse=True)
         self._db.header.create_index('resources.resource_id')  # legacy
         self._db.header.create_index(
-            [('start.uid', pymongo.DESCENDING)], unique=True)
+            [('start.uid', pymongo.DESCENDING)], unique=True, sparse=True)
         self._db.header.create_index(
             [('start.time', pymongo.DESCENDING),
              ('start.scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
         self._db.header.create_index([("$**", "text")])
-        self._db.header.create_index('stop.run_start', unique=True)
-        self._db.header.create_index('stop.uid', unique=True)
+        self._db.header.create_index('stop.run_start', unique=True, sparse=True)
+        self._db.header.create_index('stop.uid', unique=True, sparse=True)
         self._db.header.create_index(
-            [('stop.time', pymongo.DESCENDING)], unique=False, background=True)
+            [('stop.time', pymongo.DESCENDING)], unique=False,
+            background=True, sparse=True)
         self._db.header.create_index(
-            [('descriptors.uid', pymongo.DESCENDING)], unique=True)
+            [('descriptors.uid', pymongo.DESCENDING)], unique=True, sparse=True)
         self._db.header.create_index(
             [('descriptors.run_start', pymongo.DESCENDING),
              ('time', pymongo.DESCENDING)],
@@ -164,12 +165,12 @@ class Serializer(event_model.DocumentRouter):
             [('descriptors.time', pymongo.DESCENDING)],
             unique=False, background=True)
         self._db.event.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+            [('uid', pymongo.DESCENDING)], unique=True, sparse=True)
         self._db.event.create_index(
             [('descriptor', pymongo.DESCENDING),
              ('time.0', pymongo.ASCENDING)],
             unique=False, background=True)
-        self._db.datum.create_index('datum_id', unique=True)
+        self._db.datum.create_index('datum_id', unique=True, sparse=True)
         self._db.datum.create_index('resource')
 
     def __call__(self, name, doc):
@@ -335,9 +336,9 @@ class Serializer(event_model.DocumentRouter):
         return doc
 
     def close(self):
-        self.freeze(self._run_uid)
+        self.finalize(self._run_uid)
 
-    def freeze(self, run_uid):
+    def finalize(self, run_uid):
         """
         Finalize insertion of the run.
         """
@@ -349,8 +350,6 @@ class Serializer(event_model.DocumentRouter):
         # Interupt the count worker sleep
         self._count.set()
 
-        # No need to wait the 5 seconds for count_executor to finish because we
-        # update the final count after explicitly durring freeze.
         self._count_executor.shutdown(wait=True)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
