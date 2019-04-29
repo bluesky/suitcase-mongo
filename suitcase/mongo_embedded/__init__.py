@@ -40,11 +40,11 @@ class Serializer(event_model.DocumentRouter):
     >>> from ophyd.sim import det, motor
     >>> from suitcase.mongo_embedded import Serializer
 
-    >>> # Create two sandboxed mongo instances
+    >>> # Create a sandboxed mongo instance.
     >>> mongo_box = MongoBox()
     >>> mongo_box.start()
 
-    >>> # Get references to the mongo databases
+    >>> # Get a reference to the mongo database.
     >>> db = mongo_box.client().db
 
     >>> # Create the Serializer
