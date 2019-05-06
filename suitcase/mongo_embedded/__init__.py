@@ -348,15 +348,15 @@ class Serializer(event_model.DocumentRouter):
         self._event_queue.put(False)
         self._datum_queue.put(False)
 
-        # Interupt the count worker sleep
-        self._count.set()
-
-        self._count_executor.shutdown(wait=True)
         self._event_executor.shutdown(wait=True)
         self._datum_executor.shutdown(wait=True)
 
-        self._set_header('event_count', sum(self._event_count.values()))
-        self._set_header('datum_count', sum(self._datum_count.values()))
+        # Interupt the count worker sleep
+        self._count.set()
+        self._count_executor.shutdown(wait=True)
+
+        self._set_header('event_count', sum(self._db_event_count.values()))
+        self._set_header('datum_count', sum(self._db_datum_count.values()))
 
         if self._worker_error:
             raise RuntimeError("Worker exception: ") from self._worker_error
