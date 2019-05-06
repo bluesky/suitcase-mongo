@@ -171,8 +171,10 @@ class Serializer(event_model.DocumentRouter):
             [('descriptor', pymongo.DESCENDING),
              ('time.0', pymongo.ASCENDING)],
             unique=False, background=True)
+        self._db.event.create_index('last_index', pymongo.ASCENDING),
         self._db.datum.create_index('datum_id', unique=True, sparse=True)
         self._db.datum.create_index('resource')
+        self._db.datum.create_index('last_index', pymongo.ASCENDING)
 
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
