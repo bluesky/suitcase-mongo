@@ -52,8 +52,11 @@ class Serializer(event_model.DocumentRouter):
 
         If the index already exists, this has no effect.
         """
-        self._resource_collection.create_index('uid', unique=True)
+        self._resource_collection.create_index('uid')
         self._resource_collection.create_index('resource_id')  # legacy
+        # TODO: Migrate all Resources to have a RunStart UID, and then make a
+        # unique index on:
+        # [('uid', pymongo.ASCENDING), ('run_start', pymongo.ASCENDING)]
         self._datum_collection.create_index('datum_id', unique=True)
         self._datum_collection.create_index('resource')
         self._run_start_collection.create_index(
