@@ -33,7 +33,9 @@ class Serializer(event_model.DocumentRouter):
         else:
             assets_db = asset_registry_db
         self._run_start_collection = mds_db.get_collection('run_start')
+        self._run_start_collection_revisions = mds_db.get_collection('run_start_revisions')
         self._run_stop_collection = mds_db.get_collection('run_stop')
+        self._run_stop_collection_revisions = mds_db.get_collection('run_stop_revisions')
         self._event_descriptor_collection = mds_db.get_collection(
                                                         'event_descriptor')
         self._event_collection = mds_db.get_collection('event')
@@ -89,6 +91,18 @@ class Serializer(event_model.DocumentRouter):
         # Python types compatible with pymongo.
         sanitized_doc = event_model.sanitize_doc(doc)
         return super().__call__(name, sanitized_doc)
+
+    def update(self, name, doc):
+        if name in ['run_start', 'run_stop']:
+            current_col = getattr(self, '_'+name+'_collection')
+            revisions_col = getattr(self, '_'+name+'_collection_revisions')
+            old = current_col.find_one_and_delete({}, {'uid': doc['uid']})
+            old['revision'] = revisions_col.count()
+            revisions_col.insert_one(old)
+            current_col.insert_one(doc)
+        else:
+            raise NotImplementedError(
+                    'Only run_start and run_stop could be updated')
 
     def start(self, doc):
         self._run_start_collection.insert_one(doc)
