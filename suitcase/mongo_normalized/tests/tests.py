@@ -26,7 +26,8 @@ def test_update(db_factory, example_data):
     for item in documents:
         serializer(*item)
     origin = documents[0][1]
-    origin['hints']['dimensions'] = listit(origin['hints']['dimensions'])
+    if 'hints' in origin.keys():
+        origin['hints']['dimensions'] = listit(origin['hints']['dimensions'])
     start = copy.deepcopy(origin)
     start['user'] = 'first updated temp user'
     serializer.update('start', start)
