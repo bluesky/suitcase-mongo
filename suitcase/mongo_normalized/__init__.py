@@ -98,12 +98,12 @@ class Serializer(event_model.DocumentRouter):
             revisions_col = getattr(self, f'_run_{name}_collection_revisions')
             old = current_col.find_one({'uid': doc['uid']})
             old.pop('_id')
-            if revisions_col.find({'uid': doc['uid']}).count() == 0:
-                old['revision'] = 0
-            else:
+            try:
                 target_uid_docs = revisions_col.find({'uid': doc['uid']})
                 cur = target_uid_docs.sort([('revision', -1)]).limit(1)
                 old['revision'] = next(cur)['revision'] + 1
+            except StopIteration:
+                old['revision'] = 0
             revisions_col.insert_one(old)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
         else:
