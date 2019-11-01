@@ -93,21 +93,22 @@ class Serializer(event_model.DocumentRouter):
         return super().__call__(name, sanitized_doc)
 
     def update(self, name, doc):
-        if name in ['run_start', 'run_stop']:
-            current_col = getattr(self, '_'+name+'_collection')
-            revisions_col = getattr(self, '_'+name+'_collection_revisions')
-            old = current_col.find_one({}, {'uid': doc['uid']})
+        if name in ['start', 'stop']:
+            current_col = getattr(self, f'_run_{name}_collection')
+            revisions_col = getattr(self, f'_run_{name}_collection_revisions')
+            old = current_col.find_one({'uid': doc['uid']})
             old.pop('_id')
-            if revisions_col.count() == 0:
+            if revisions_col.find({'uid': doc['uid']}).count() == 0:
                 old['revision'] = 0
             else:
-                cur = revisions_col.find().sort([('revision', -1)]).limit(1)
+                target_uid_docs = revisions_col.find({'uid': doc['uid']})
+                cur = target_uid_docs.sort([('revision', -1)]).limit(1)
                 old['revision'] = next(cur)['revision'] + 1
             revisions_col.insert_one(old)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
         else:
             raise NotImplementedError(
-                    'Only run_start and run_stop could be updated')
+                    'Only start and stop could be updated')
 
     def start(self, doc):
         self._run_start_collection.insert_one(doc)
