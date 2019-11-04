@@ -2,6 +2,7 @@
 # binary files should be included in the repository.
 
 import copy
+from event_model import sanitize_doc
 from suitcase.mongo_normalized import Serializer
 
 
@@ -14,10 +15,6 @@ def test_export(db_factory, example_data):
         serializer(*item)
 
 
-def listit(t):
-    return list(map(listit, t)) if isinstance(t, (list, tuple)) else t
-
-
 def test_update(db_factory, example_data):
     documents = example_data()
     metadatastore_db = db_factory()
@@ -25,30 +22,28 @@ def test_update(db_factory, example_data):
     serializer = Serializer(metadatastore_db, asset_registry_db)
     for item in documents:
         serializer(*item)
-    origin = documents[0][1]
-    if 'hints' in origin.keys():
-        origin['hints']['dimensions'] = listit(origin['hints']['dimensions'])
-    start = copy.deepcopy(origin)
+    original = documents[0][1]
+    start = copy.deepcopy(original)
     start['user'] = 'first updated temp user'
     serializer.update('start', start)
     real = metadatastore_db.get_collection('run_start').find_one({'uid': start['uid']})
     real.pop('_id')
-    assert real == start
+    assert sanitize_doc(real) == sanitize_doc(start)
     revision = metadatastore_db.get_collection('run_start_revisions').find_one({'uid': start['uid']})
     assert revision['revision'] == 0
     revision.pop('revision')
     revision.pop('_id')
-    assert revision == origin
+    assert sanitize_doc(revision) == sanitize_doc(original)
 
     revision1 = copy.deepcopy(start)
     start['user'] = 'second updated temp user'
     serializer.update('start', start)
     real = metadatastore_db.get_collection('run_start').find_one({'uid': start['uid']})
     real.pop('_id')
-    assert real == start
+    assert sanitize_doc(real) == sanitize_doc(start)
     revision = metadatastore_db.get_collection('run_start_revisions').find_one({'uid': start['uid'],
                                                                                 'revision': 1})
     assert revision['revision'] == 1
     revision.pop('revision')
     revision.pop('_id')
-    assert revision == revision1
+    assert sanitize_doc(revision) == sanitize_doc(revision1)
