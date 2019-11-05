@@ -68,3 +68,11 @@ def test_validation_error(db_factory, example_data):
     serializer = Serializer(metadatastore_db, asset_registry_db)
     with pytest.raises(ValidationError) as e:
         assert serializer.update('start', {})
+
+
+def test_revision_reserved_error(db_factory, example_data):
+    metadatastore_db = db_factory()
+    asset_registry_db = db_factory()
+    serializer = Serializer(metadatastore_db, asset_registry_db)
+    with pytest.raises(ValueError):
+        assert serializer.update('start', {'revision': 0})

@@ -94,6 +94,8 @@ class Serializer(event_model.DocumentRouter):
 
     def update(self, name, doc):
         if name == 'start':
+            if 'revision' in doc.keys():
+                raise ValueError('revision is a reserved keyword, use other key in doc')
             schema_validators[DocumentNames.start].validate(doc)
             current_col = self._run_start_collection
             revisions_col = self._run_start_collection_revisions
