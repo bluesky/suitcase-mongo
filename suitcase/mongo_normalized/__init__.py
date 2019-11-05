@@ -99,7 +99,7 @@ class Serializer(event_model.DocumentRouter):
             old = current_col.find_one({'uid': doc['uid']})
             old.pop('_id')
             target_uid_docs = revisions_col.find({'uid': doc['uid']})
-            cur = target_uid_docs.sort([('revision', -1)]).limit(1)
+            cur = target_uid_docs.sort([('revision', pymongo.DESCENDING)]).limit(1)
             try:
                 old['revision'] = next(cur)['revision'] + 1
             except StopIteration:
