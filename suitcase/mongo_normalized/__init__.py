@@ -1,6 +1,7 @@
 import event_model
 import pymongo
 from ._version import get_versions
+from event_model import schema_validators, DocumentNames
 
 
 __version__ = get_versions()['version']
@@ -93,9 +94,10 @@ class Serializer(event_model.DocumentRouter):
         return super().__call__(name, sanitized_doc)
 
     def update(self, name, doc):
-        if name in ['start', 'stop']:
-            current_col = getattr(self, f'_run_{name}_collection')
-            revisions_col = getattr(self, f'_run_{name}_collection_revisions')
+        if name == 'start':
+            schema_validators[DocumentNames.start].validate(doc)
+            current_col = self._run_start_collection
+            revisions_col = self._run_start_collection_revisions
             old = current_col.find_one({'uid': doc['uid']})
             old.pop('_id')
             target_uid_docs = revisions_col.find({'uid': doc['uid']})
@@ -107,8 +109,7 @@ class Serializer(event_model.DocumentRouter):
             revisions_col.insert_one(old)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
         else:
-            raise NotImplementedError(
-                    'Only start and stop could be updated')
+            raise NotImplementedError('Only start could be updated')
 
     def start(self, doc):
         self._run_start_collection.insert_one(doc)
