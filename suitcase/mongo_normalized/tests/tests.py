@@ -2,7 +2,9 @@
 # binary files should be included in the repository.
 
 import copy
+import pytest
 from event_model import sanitize_doc
+from jsonschema import ValidationError
 from suitcase.mongo_normalized import Serializer
 
 
@@ -47,3 +49,22 @@ def test_update(db_factory, example_data):
     revision.pop('revision')
     revision.pop('_id')
     assert sanitize_doc(revision) == sanitize_doc(revision1)
+
+
+def test_notimplemented_error(db_factory, example_data):
+    documents = example_data()
+    metadatastore_db = db_factory()
+    asset_registry_db = db_factory()
+    serializer = Serializer(metadatastore_db, asset_registry_db)
+    with pytest.raises(NotImplementedError) as e:
+        assert serializer.update('not_start', {})
+    assert str(e.value) == 'Only start could be updated'
+
+
+def test_validation_error(db_factory, example_data):
+    documents = example_data()
+    metadatastore_db = db_factory()
+    asset_registry_db = db_factory()
+    serializer = Serializer(metadatastore_db, asset_registry_db)
+    with pytest.raises(ValidationError) as e:
+        assert serializer.update('start', {})
