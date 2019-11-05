@@ -52,7 +52,6 @@ def test_update(db_factory, example_data):
 
 
 def test_notimplemented_error(db_factory, example_data):
-    documents = example_data()
     metadatastore_db = db_factory()
     asset_registry_db = db_factory()
     serializer = Serializer(metadatastore_db, asset_registry_db)
@@ -62,11 +61,10 @@ def test_notimplemented_error(db_factory, example_data):
 
 
 def test_validation_error(db_factory, example_data):
-    documents = example_data()
     metadatastore_db = db_factory()
     asset_registry_db = db_factory()
     serializer = Serializer(metadatastore_db, asset_registry_db)
-    with pytest.raises(ValidationError) as e:
+    with pytest.raises(ValidationError):
         assert serializer.update('start', {})
 
 
