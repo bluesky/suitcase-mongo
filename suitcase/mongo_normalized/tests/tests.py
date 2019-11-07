@@ -35,7 +35,7 @@ def test_update(db_factory, example_data):
     assert revision['revision'] == 0
     revision.pop('revision')
     revision.pop('_id')
-    assert sanitize_doc(revision) == sanitize_doc(original)
+    assert sanitize_doc(revision['document']) == sanitize_doc(original)
 
     revision1 = copy.deepcopy(start)
     start['user'] = 'second updated temp user'
@@ -48,7 +48,7 @@ def test_update(db_factory, example_data):
     assert revision['revision'] == 1
     revision.pop('revision')
     revision.pop('_id')
-    assert sanitize_doc(revision) == sanitize_doc(revision1)
+    assert sanitize_doc(revision['document']) == sanitize_doc(revision1)
 
 
 def test_notimplemented_error(db_factory, example_data):
@@ -66,11 +66,3 @@ def test_validation_error(db_factory, example_data):
     serializer = Serializer(metadatastore_db, asset_registry_db)
     with pytest.raises(ValidationError):
         assert serializer.update('start', {})
-
-
-def test_revision_reserved_error(db_factory, example_data):
-    metadatastore_db = db_factory()
-    asset_registry_db = db_factory()
-    serializer = Serializer(metadatastore_db, asset_registry_db)
-    with pytest.raises(ValueError):
-        assert serializer.update('start', {'revision': 0})

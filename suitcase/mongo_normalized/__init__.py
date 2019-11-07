@@ -94,8 +94,6 @@ class Serializer(event_model.DocumentRouter):
 
     def update(self, name, doc):
         if name == 'start':
-            if 'revision' in doc.keys():
-                raise ValueError('revision is a reserved keyword, use other key in doc')
             schema_validators[DocumentNames.start].validate(doc)
             current_col = self._run_start_collection
             revisions_col = self._run_start_collection_revisions
@@ -103,11 +101,14 @@ class Serializer(event_model.DocumentRouter):
             old.pop('_id')
             target_uid_docs = revisions_col.find({'uid': doc['uid']})
             cur = target_uid_docs.sort([('revision', pymongo.DESCENDING)]).limit(1)
+            wrapped = dict()
             try:
-                old['revision'] = next(cur)['revision'] + 1
+                wrapped['revision'] = next(cur)['revision'] + 1
             except StopIteration:
-                old['revision'] = 0
-            revisions_col.insert_one(old)
+                wrapped['revision'] = 0
+            wrapped['document'] = old
+            wrapped['uid'] = wrapped['document']['uid']
+            revisions_col.insert_one(wrapped)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
         else:
             raise NotImplementedError('Only start could be updated')
