@@ -4,7 +4,7 @@ bluesky
 codecov
 coverage
 flake8
-pytest >=4.6.5
+pytest >=5.1.0
 sphinx
 suitcase-utils[test_fixtures] >=0.1.0rc2
 # These are dependencies of various sphinx extensions for documentation.
