@@ -1,11 +1,10 @@
 # These are required for developing the package (running the tests, building
 # the documentation) but not necessarily required for _using_ it.
-attrs <= 19.1.0
 bluesky
 codecov
 coverage
 flake8
-pytest >=3.9
+pytest >=4.6.5
 sphinx
 suitcase-utils[test_fixtures] >=0.1.0rc2
 # These are dependencies of various sphinx extensions for documentation.
