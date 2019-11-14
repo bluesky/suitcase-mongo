@@ -93,6 +93,24 @@ class Serializer(event_model.DocumentRouter):
         return super().__call__(name, sanitized_doc)
 
     def update(self, name, doc):
+        """
+        Update start document in MongoDB.
+
+        This operation update start docuemnt in run_start collection. Also, old
+        document will be inserted to "run_start_collection_revisions" collection
+        with a wrapper. Wrapper will have revision and document as field. revision
+        number will ascend automatically by each update operation.
+
+        Parameters
+        ----------
+
+        name: str, 'start'
+            It has to be 'start', otherwise it will raise NotImplementedError
+
+        doc: dict
+            Need contain key 'uid' for finding the document you want to update
+
+        """
         if name == 'start':
             schema_validators[DocumentNames.start].validate(doc)
             current_col = self._run_start_collection
