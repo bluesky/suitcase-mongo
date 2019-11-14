@@ -1,7 +1,6 @@
 import event_model
 import pymongo
 from ._version import get_versions
-from event_model import schema_validators, DocumentNames
 
 
 __version__ = get_versions()['version']
@@ -112,7 +111,7 @@ class Serializer(event_model.DocumentRouter):
 
         """
         if name == 'start':
-            schema_validators[DocumentNames.start].validate(doc)
+            event_model.schema_validators[event_model.DocumentNames.start].validate(doc)
             current_col = self._run_start_collection
             revisions_col = self._run_start_collection_revisions
             old = current_col.find_one({'uid': doc['uid']})
