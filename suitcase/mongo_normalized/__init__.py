@@ -93,22 +93,20 @@ class Serializer(event_model.DocumentRouter):
 
     def update(self, name, doc):
         """
-        Update start document in MongoDB.
+        Update documents. Currently only 'start' documents are supported.
 
-        This operation update start docuemnt in run_start collection. Also, old
-        document will be inserted to "run_start_collection_revisions" collection
-        with a wrapper. Wrapper will have revision and document as field. revision
-        number will ascend automatically by each update operation.
+        The original copy is retained internally, but there is as of yet no
+        *public* API for retrieving anything but the most recent update.
 
         Parameters
         ----------
 
-        name: str, 'start'
-            It has to be 'start', otherwise it will raise NotImplementedError
-
+        name: {'start'}
+            The type of document being updated. Currently, only 'start' is
+            supported and any other value here will raise NotImplementedError.
         doc: dict
-            Need contain key 'uid' for finding the document you want to update
-
+            The new version of the document. Its uid will be used to match it
+            to the current version, the one to be updated.
         """
         if name == 'start':
             event_model.schema_validators[event_model.DocumentNames.start].validate(doc)
@@ -127,7 +125,9 @@ class Serializer(event_model.DocumentRouter):
             revisions_col.insert_one(wrapped)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
         else:
-            raise NotImplementedError('Only start could be updated')
+            raise NotImplementedError(
+                f"Updating a {name} document is not currently supported. "
+                f"Only updates to 'start' documents are supported.")
 
     def start(self, doc):
         self._run_start_collection.insert_one(doc)
