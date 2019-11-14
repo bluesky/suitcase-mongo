@@ -99,7 +99,7 @@ class Serializer(event_model.DocumentRouter):
             revisions_col = self._run_start_collection_revisions
             old = current_col.find_one({'uid': doc['uid']})
             old.pop('_id')
-            target_uid_docs = revisions_col.find({'uid': doc['document.uid']})
+            target_uid_docs = revisions_col.find({'document.uid': doc['uid']})
             cur = target_uid_docs.sort([('revision', pymongo.DESCENDING)]).limit(1)
             wrapped = dict()
             try:
@@ -107,7 +107,6 @@ class Serializer(event_model.DocumentRouter):
             except StopIteration:
                 wrapped['revision'] = 0
             wrapped['document'] = old
-            wrapped['uid'] = wrapped['document']['uid']
             revisions_col.insert_one(wrapped)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
         else:

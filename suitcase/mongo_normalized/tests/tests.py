@@ -31,7 +31,7 @@ def test_update(db_factory, example_data):
     real = metadatastore_db.get_collection('run_start').find_one({'uid': start['uid']})
     real.pop('_id')
     assert sanitize_doc(real) == sanitize_doc(start)
-    revision = metadatastore_db.get_collection('run_start_revisions').find_one({'uid': start['uid']})
+    revision = metadatastore_db.get_collection('run_start_revisions').find_one({'document.uid': start['uid']})
     assert revision['revision'] == 0
     revision.pop('revision')
     revision.pop('_id')
@@ -43,7 +43,7 @@ def test_update(db_factory, example_data):
     real = metadatastore_db.get_collection('run_start').find_one({'uid': start['uid']})
     real.pop('_id')
     assert sanitize_doc(real) == sanitize_doc(start)
-    revision = metadatastore_db.get_collection('run_start_revisions').find_one({'uid': start['uid'],
+    revision = metadatastore_db.get_collection('run_start_revisions').find_one({'document.uid': start['uid'],
                                                                                 'revision': 1})
     assert revision['revision'] == 1
     revision.pop('revision')
