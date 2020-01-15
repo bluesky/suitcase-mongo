@@ -340,6 +340,12 @@ class Serializer(event_model.DocumentRouter):
     def close(self):
         self.finalize(self._run_uid)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_details):
+        self.close()
+
     def finalize(self, run_uid):
         """
         Finalize insertion of the run.
