@@ -4,7 +4,7 @@ from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from pymongo import UpdateOne
 import pymongo
-from threading import Event
+from threading import Event, Lock
 import time
 import queue
 import bson
@@ -83,6 +83,7 @@ class Serializer(event_model.DocumentRouter):
             maximum time that the workers will wait before doing a database
             insert.
         """
+        self._frozen_lock = Lock()
 
         # There is no performace improvment for more than 10 threads. Tests
         # validate for upto 10 threads.
@@ -344,7 +345,10 @@ class Serializer(event_model.DocumentRouter):
         Finalize insertion of the run.
         """
         # Freeze the serializer.
-        self._frozen = True
+        with self._frozen_lock:
+            if self._frozen:
+                return
+            self._frozen = True
         self._event_queue.put(False)
         self._datum_queue.put(False)
 
