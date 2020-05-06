@@ -237,17 +237,13 @@ class Serializer(event_model.DocumentRouter):
 
 
 def _get_database(uri):
-    client = pymongo.MongoClient(uri)
-    try:
-        # Called with no args, get_database() returns the database
-        # specified in the client's uri --- or raises if there was none.
-        # There is no public method for checking this in advance, so we
-        # just catch the error.
-        return client.get_database()
-    except pymongo.errors.ConfigurationError as err:
+    if not pymongo.uri_parser.parse_uri(uri)['database']:
         raise ValueError(
-            f"Invalid client: {client} "
-            f"Did you forget to include a database?") from err
+            f"Invalid URI: {uri} "
+            f"Did you forget to include a database?")
+    else:
+        client = pymongo.MongoClient(uri)
+        return client.get_database()
 
 
 class DuplicateUniqueID(Exception):
