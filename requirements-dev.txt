@@ -5,6 +5,7 @@ codecov
 coverage
 flake8
 pytest >=3.9
+pyPDB
 sphinx
 suitcase-utils[test_fixtures] >=0.1.0rc2
 # These are dependencies of various sphinx extensions for documentation.
