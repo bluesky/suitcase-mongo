@@ -10,7 +10,7 @@ import uuid
 def db_factory(request):
     def inner():
         database_name = f'test-{str(uuid.uuid4())}'
-        uri = f'mongodb://localhost:27017/'
+        uri = 'mongodb://localhost:27017/'
         client = pymongo.MongoClient(uri)
 
         def drop():

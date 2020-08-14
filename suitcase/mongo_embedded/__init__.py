@@ -88,11 +88,11 @@ class Serializer(event_model.DocumentRouter):
         # There is no performace improvment for more than 10 threads. Tests
         # validate for upto 10 threads.
         if num_threads > 10 or num_threads < 1:
-            raise ValueError(f"num_threads must be between 1 and 10"
+            raise ValueError("num_threads must be between 1 and 10"
                              "inclusive.")
 
         if page_size < 1000:
-            raise ValueError(f"page_size must be >= 1000")
+            raise ValueError("page_size must be >= 1000")
 
         # Maximum size of a document in mongo is 16MB. buffer_size + page_size
         # defines the biggest document that can be created.
@@ -189,6 +189,7 @@ class Serializer(event_model.DocumentRouter):
 
     def _try_wrapper(f):
         from functools import wraps
+
         @wraps(f)
         def inner(self):
             try:
