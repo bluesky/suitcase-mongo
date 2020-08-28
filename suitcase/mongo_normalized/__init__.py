@@ -41,6 +41,13 @@ class Serializer(event_model.DocumentRouter):
         self._resource_collection = assets_db.get_collection('resource')
         self._datum_collection = assets_db.get_collection('datum')
 
+        self._collections = {'start': self._run_start_collection,
+                             'stop': self._run_stop_collection,
+                             'resource': self._resource_collection,
+                             'descriptor': self._event_descriptor_collection,
+                             'event': self._event_collection,
+                             'datum': self._datum_collection}
+
         self._metadatastore_db = mds_db
         self._asset_registry_db = assets_db
 
@@ -87,6 +94,15 @@ class Serializer(event_model.DocumentRouter):
         sanitized_doc = event_model.sanitize_doc(doc)
         return super().__call__(name, sanitized_doc)
 
+    def _insert(self, name, doc):
+        try:
+            self._collections[name].insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
+            existing = self._collections[name].find_one({'uid': doc['uid']}, {'_id': False})
+            if existing != doc:
+                raise err
+
     def update(self, name, doc):
         """
         Update documents. Currently only 'start' documents are supported.
@@ -126,40 +142,16 @@ class Serializer(event_model.DocumentRouter):
                 f"Only updates to 'start' documents are supported.")
 
     def start(self, doc):
-        try:
-            self._run_start_collection.insert_one(doc)
-        except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._run_start_collection.find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
-                raise err
+        self._insert('start', doc)
 
     def descriptor(self, doc):
-        try:
-            self._event_descriptor_collection.insert_one(doc)
-        except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._event_descriptor_collection.find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
-                raise err
+        self._insert('descriptor', doc)
 
     def resource(self, doc):
-        try:
-            self._resource_collection.insert_one(doc)
-        except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._resource_collection.find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
-                raise err
+        self._insert('resource', doc)
 
     def event(self, doc):
-        try:
-            self._event_collection.insert_one(doc)
-        except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._event_collection.find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
-                raise err
+        self._insert('event', doc)
 
     def event_page(self, doc):
         # Unpack an EventPage into Events and do the actual insert inside
@@ -173,13 +165,7 @@ class Serializer(event_model.DocumentRouter):
             filled_events.append(event_method(event_doc))
 
     def datum(self, doc):
-        try:
-            self._datum_collection.insert_one(doc)
-        except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._datum_collection.find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
-                raise err
+        self._insert('datum', doc)
 
     def datum_page(self, doc):
         # Unpack an DatumPage into Datum and do the actual insert inside
@@ -193,13 +179,7 @@ class Serializer(event_model.DocumentRouter):
             filled_datums.append(datum_method(datum_doc))
 
     def stop(self, doc):
-        try:
-            self._run_stop_collection.insert_one(doc)
-        except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._run_stop_collection.find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
-                raise err
+        self._insert('stop', doc)
 
     def __repr__(self):
         # Display connection info in eval-able repr.
