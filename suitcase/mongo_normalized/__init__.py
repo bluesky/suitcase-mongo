@@ -130,7 +130,12 @@ class Serializer(event_model.DocumentRouter):
                 f"Only updates to 'start' documents are supported.")
 
     def start(self, doc):
-        self._run_start_collection.insert_one(doc)
+        try:
+            self._run_start_collection.insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            existing = self._run_start_collection.find_one({'uid': doc['uid'])
+            if existing != doc:
+                raise err
 
     def descriptor(self, doc):
         self._event_descriptor_collection.insert_one(doc)

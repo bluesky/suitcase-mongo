@@ -17,6 +17,18 @@ def test_export(db_factory, example_data):
         serializer(*item)
 
 
+def test_duplicates(db_factory, example_data):
+    # Duplicate should not cause exceptions, and should be deduped.
+    documents = example_data()
+    metadatastore_db = db_factory()
+    asset_registry_db = db_factory()
+    serializer = Serializer(metadatastore_db, asset_registry_db)
+    for item in documents:
+        serializer(*item)
+    for item in documents:
+        serializer(*item)
+
+
 def test_update(db_factory, example_data):
     documents = example_data()
     metadatastore_db = db_factory()
