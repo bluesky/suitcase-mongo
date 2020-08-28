@@ -1,10 +1,12 @@
 import event_model
+import logging
 import pymongo
 from ._version import get_versions
 
-
 __version__ = get_versions()['version']
 del get_versions
+
+logger = logging.getLogger(name="bluesky.suitcase.mongo")
 
 
 class Serializer(event_model.DocumentRouter):
@@ -86,7 +88,11 @@ class Serializer(event_model.DocumentRouter):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
         sanitized_doc = event_model.sanitize_doc(doc)
-        return super().__call__(name, sanitized_doc)
+        try:
+            return super().__call__(name, sanitized_doc)
+        except Exception as err:
+            logger.error(f"mongo insert failed: {err}")
+            raise err
 
     def update(self, name, doc):
         """
