@@ -79,7 +79,7 @@ class Serializer(event_model.DocumentRouter):
         self._event_descriptor_collection.create_index([("$**", "text")])
         self._event_collection.create_index('uid', unique=True)
         self._event_collection.create_index(
-            [('descriptor', pymongo.DESCENDING), ('time', pymongo.ASCENDING)],
+            ['descriptor', ('time', pymongo.ASCENDING)],
             unique=False, background=True)
 
     def __call__(self, name, doc):
