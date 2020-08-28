@@ -189,6 +189,7 @@ class Serializer(event_model.DocumentRouter):
 
     def _try_wrapper(f):
         from functools import wraps
+
         @wraps(f)
         def inner(self):
             try:

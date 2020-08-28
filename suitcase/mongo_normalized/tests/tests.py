@@ -36,6 +36,7 @@ def test_duplicates(db_factory, example_data):
         for item in documents:
             serializer(*item)
 
+
 def test_update(db_factory, example_data):
     documents = example_data()
     metadatastore_db = db_factory()
