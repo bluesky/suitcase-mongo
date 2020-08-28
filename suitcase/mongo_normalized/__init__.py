@@ -133,18 +133,33 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._run_start_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._run_start_collection.find_one({'uid': doc['uid'])
+            existing = self._run_start_collection.find_one({'uid': doc['uid']}, {'_id': False}))
             if existing != doc:
                 raise err
 
     def descriptor(self, doc):
-        self._event_descriptor_collection.insert_one(doc)
+        try:
+            self._event_descriptor_collection.insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            existing = self._event_descriptor_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            if existing != doc:
+                raise err
 
     def resource(self, doc):
-        self._resource_collection.insert_one(doc)
+        try:
+            self._resource_collection.insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            existing = self._resource_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            if existing != doc:
+                raise err
 
     def event(self, doc):
-        self._event_collection.insert_one(doc)
+        try:
+            self._event_collection.insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            existing = self._event_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            if existing != doc:
+                raise err
 
     def event_page(self, doc):
         # Unpack an EventPage into Events and do the actual insert inside
@@ -158,7 +173,12 @@ class Serializer(event_model.DocumentRouter):
             filled_events.append(event_method(event_doc))
 
     def datum(self, doc):
-        self._datum_collection.insert_one(doc)
+        try:
+            self._datum_collection.insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            existing = self._datum_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            if existing != doc:
+                raise err
 
     def datum_page(self, doc):
         # Unpack an DatumPage into Datum and do the actual insert inside
@@ -172,7 +192,12 @@ class Serializer(event_model.DocumentRouter):
             filled_datums.append(datum_method(datum_doc))
 
     def stop(self, doc):
-        self._run_stop_collection.insert_one(doc)
+        try:
+            self._run_stop_collection.insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            existing = self._run_stop_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            if existing != doc:
+                raise err
 
     def __repr__(self):
         # Display connection info in eval-able repr.
