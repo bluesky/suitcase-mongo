@@ -28,6 +28,9 @@ def test_duplicates(db_factory, example_data):
         serializer(*item)
     for item in documents:
         serializer(*item)
+
+    # Modify a document, check that inserting a document with uid,
+    # but different content raises.
     documents[0][1]['new_key'] = 'new_value'
     with pytest.raises(DuplicateKeyError):
         for item in documents:
