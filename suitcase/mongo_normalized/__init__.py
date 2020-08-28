@@ -1,12 +1,9 @@
 import event_model
-import logging
 import pymongo
 from ._version import get_versions
 
 __version__ = get_versions()['version']
 del get_versions
-
-logger = logging.getLogger(name="bluesky.suitcase.mongo")
 
 
 class Serializer(event_model.DocumentRouter):
@@ -81,18 +78,14 @@ class Serializer(event_model.DocumentRouter):
         self._event_descriptor_collection.create_index([("$**", "text")])
         self._event_collection.create_index('uid', unique=True)
         self._event_collection.create_index(
-            ['descriptor', ('time', pymongo.ASCENDING)],
+            [('descriptor', pymongo.DESCENDING), ('time', pymongo.ASCENDING)],
             unique=False, background=True)
 
     def __call__(self, name, doc):
         # Before inserting into mongo, convert any numpy objects into built-in
         # Python types compatible with pymongo.
         sanitized_doc = event_model.sanitize_doc(doc)
-        try:
-            return super().__call__(name, sanitized_doc)
-        except Exception as err:
-            logger.error(f"mongo insert failed: {err}")
-            raise err
+        return super().__call__(name, sanitized_doc)
 
     def update(self, name, doc):
         """
@@ -136,7 +129,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._run_start_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._run_start_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            existing = self._run_start_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
 
@@ -144,7 +137,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._event_descriptor_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._event_descriptor_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            existing = self._event_descriptor_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
 
@@ -152,7 +145,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._resource_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._resource_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            existing = self._resource_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
 
@@ -160,7 +153,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._event_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._event_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            existing = self._event_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
 
@@ -179,7 +172,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._datum_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._datum_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            existing = self._datum_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
 
@@ -198,7 +191,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._run_stop_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            existing = self._run_stop_collection.find_one({'uid': doc['uid']}, {'_id': False}))
+            existing = self._run_stop_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
 
