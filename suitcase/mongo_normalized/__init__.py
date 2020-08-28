@@ -129,6 +129,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._run_start_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
             existing = self._run_start_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
@@ -137,6 +138,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._event_descriptor_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
             existing = self._event_descriptor_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
@@ -145,6 +147,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._resource_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
             existing = self._resource_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
@@ -153,6 +156,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._event_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
             existing = self._event_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
@@ -172,6 +176,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._datum_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
             existing = self._datum_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
@@ -191,6 +196,7 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._run_stop_collection.insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
+            doc.pop('_id')
             existing = self._run_stop_collection.find_one({'uid': doc['uid']}, {'_id': False})
             if existing != doc:
                 raise err
