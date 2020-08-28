@@ -143,7 +143,7 @@ class Serializer(event_model.DocumentRouter):
         Create indexes on the various collections.
          If the index already exists, this has no effect.
         """
-        self._db.header.create_index('resources.uid', sparse=True)
+        self._db.header.create_index('resources.uid', unique=True, sparse=True)
         self._db.header.create_index('resources.resource_id')  # legacy
         self._db.header.create_index(
             [('start.uid', pymongo.DESCENDING)], unique=True, sparse=True)
