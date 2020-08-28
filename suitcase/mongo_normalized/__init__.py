@@ -60,8 +60,7 @@ class Serializer(event_model.DocumentRouter):
         # [('uid', pymongo.ASCENDING), ('run_start', pymongo.ASCENDING)]
         self._datum_collection.create_index('datum_id', unique=True)
         self._datum_collection.create_index('resource')
-        self._run_start_collection.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+        self._run_start_collection.create_index('uid', unique=True)
         self._run_start_collection.create_index(
             [('time', pymongo.DESCENDING), ('scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
@@ -71,16 +70,14 @@ class Serializer(event_model.DocumentRouter):
         self._run_stop_collection.create_index(
             [('time', pymongo.DESCENDING)], unique=False, background=True)
         self._run_stop_collection.create_index([("$**", "text")])
-        self._event_descriptor_collection.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+        self._event_descriptor_collection.create_index('uid', unique=True)
         self._event_descriptor_collection.create_index(
             [('run_start', pymongo.DESCENDING), ('time', pymongo.DESCENDING)],
             unique=False, background=True)
         self._event_descriptor_collection.create_index(
             [('time', pymongo.DESCENDING)], unique=False, background=True)
         self._event_descriptor_collection.create_index([("$**", "text")])
-        self._event_collection.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+        self._event_collection.create_index('uid', unique=True)
         self._event_collection.create_index(
             [('descriptor', pymongo.DESCENDING), ('time', pymongo.ASCENDING)],
             unique=False, background=True)
