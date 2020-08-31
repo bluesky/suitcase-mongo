@@ -23,6 +23,7 @@ class Serializer(event_model.DocumentRouter):
         ----------
         metadatastore_db : pymongo.Database or URI
         asset_registry_db : pymongo.Database or URI
+        ignore_duplicates : boolean
         """
         if isinstance(metadatastore_db, str):
             mds_db = _get_database(metadatastore_db)
