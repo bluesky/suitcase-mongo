@@ -7,7 +7,8 @@ del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
-    def __init__(self, metadatastore_db, asset_registry_db):
+    def __init__(self, metadatastore_db, asset_registry_db,
+                 ignore_duplicates=True):
         """
         Insert documents into MongoDB using layout v1.
 
@@ -50,7 +51,7 @@ class Serializer(event_model.DocumentRouter):
 
         self._metadatastore_db = mds_db
         self._asset_registry_db = assets_db
-
+        self._ignore_duplicates = ignore_duplicates
         self._create_indexes()
 
     def _create_indexes(self):
@@ -98,10 +99,13 @@ class Serializer(event_model.DocumentRouter):
         try:
             self._collections[name].insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
-            doc.pop('_id')
-            existing = self._collections[name].find_one({'uid': doc['uid']}, {'_id': False})
-            if existing != doc:
+            if not self._ignore_duplicates:
                 raise err
+            else:
+                doc.pop('_id')
+                existing = self._collections[name].find_one({'uid': doc['uid']}, {'_id': False})
+                if existing != doc:
+                    raise err
 
     def update(self, name, doc):
         """
