@@ -2,13 +2,13 @@ import event_model
 import pymongo
 from ._version import get_versions
 
-
 __version__ = get_versions()['version']
 del get_versions
 
 
 class Serializer(event_model.DocumentRouter):
-    def __init__(self, metadatastore_db, asset_registry_db):
+    def __init__(self, metadatastore_db, asset_registry_db,
+                 ignore_duplicates=True):
         """
         Insert documents into MongoDB using layout v1.
 
@@ -23,6 +23,7 @@ class Serializer(event_model.DocumentRouter):
         ----------
         metadatastore_db : pymongo.Database or URI
         asset_registry_db : pymongo.Database or URI
+        ignore_duplicates : boolean
         """
         if isinstance(metadatastore_db, str):
             mds_db = _get_database(metadatastore_db)
@@ -42,9 +43,16 @@ class Serializer(event_model.DocumentRouter):
         self._resource_collection = assets_db.get_collection('resource')
         self._datum_collection = assets_db.get_collection('datum')
 
+        self._collections = {'start': self._run_start_collection,
+                             'stop': self._run_stop_collection,
+                             'resource': self._resource_collection,
+                             'descriptor': self._event_descriptor_collection,
+                             'event': self._event_collection,
+                             'datum': self._datum_collection}
+
         self._metadatastore_db = mds_db
         self._asset_registry_db = assets_db
-
+        self._ignore_duplicates = ignore_duplicates
         self._create_indexes()
 
     def _create_indexes(self):
@@ -53,15 +61,14 @@ class Serializer(event_model.DocumentRouter):
 
         If the index already exists, this has no effect.
         """
-        self._resource_collection.create_index('uid')
+        self._resource_collection.create_index('uid', unique=True)
         self._resource_collection.create_index('resource_id')  # legacy
         # TODO: Migrate all Resources to have a RunStart UID, and then make a
         # unique index on:
         # [('uid', pymongo.ASCENDING), ('run_start', pymongo.ASCENDING)]
         self._datum_collection.create_index('datum_id', unique=True)
         self._datum_collection.create_index('resource')
-        self._run_start_collection.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+        self._run_start_collection.create_index('uid', unique=True)
         self._run_start_collection.create_index(
             [('time', pymongo.DESCENDING), ('scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
@@ -71,16 +78,14 @@ class Serializer(event_model.DocumentRouter):
         self._run_stop_collection.create_index(
             [('time', pymongo.DESCENDING)], unique=False, background=True)
         self._run_stop_collection.create_index([("$**", "text")])
-        self._event_descriptor_collection.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+        self._event_descriptor_collection.create_index('uid', unique=True)
         self._event_descriptor_collection.create_index(
             [('run_start', pymongo.DESCENDING), ('time', pymongo.DESCENDING)],
             unique=False, background=True)
         self._event_descriptor_collection.create_index(
             [('time', pymongo.DESCENDING)], unique=False, background=True)
         self._event_descriptor_collection.create_index([("$**", "text")])
-        self._event_collection.create_index(
-            [('uid', pymongo.DESCENDING)], unique=True)
+        self._event_collection.create_index('uid', unique=True)
         self._event_collection.create_index(
             [('descriptor', pymongo.DESCENDING), ('time', pymongo.ASCENDING)],
             unique=False, background=True)
@@ -90,6 +95,18 @@ class Serializer(event_model.DocumentRouter):
         # Python types compatible with pymongo.
         sanitized_doc = event_model.sanitize_doc(doc)
         return super().__call__(name, sanitized_doc)
+
+    def _insert(self, name, doc):
+        try:
+            self._collections[name].insert_one(doc)
+        except pymongo.errors.DuplicateKeyError as err:
+            if not self._ignore_duplicates:
+                raise err
+            else:
+                doc.pop('_id')
+                existing = self._collections[name].find_one({'uid': doc['uid']}, {'_id': False})
+                if existing != doc:
+                    raise err
 
     def update(self, name, doc):
         """
@@ -130,16 +147,16 @@ class Serializer(event_model.DocumentRouter):
                 f"Only updates to 'start' documents are supported.")
 
     def start(self, doc):
-        self._run_start_collection.insert_one(doc)
+        self._insert('start', doc)
 
     def descriptor(self, doc):
-        self._event_descriptor_collection.insert_one(doc)
+        self._insert('descriptor', doc)
 
     def resource(self, doc):
-        self._resource_collection.insert_one(doc)
+        self._insert('resource', doc)
 
     def event(self, doc):
-        self._event_collection.insert_one(doc)
+        self._insert('event', doc)
 
     def event_page(self, doc):
         # Unpack an EventPage into Events and do the actual insert inside
@@ -153,7 +170,7 @@ class Serializer(event_model.DocumentRouter):
             filled_events.append(event_method(event_doc))
 
     def datum(self, doc):
-        self._datum_collection.insert_one(doc)
+        self._insert('datum', doc)
 
     def datum_page(self, doc):
         # Unpack an DatumPage into Datum and do the actual insert inside
@@ -167,7 +184,7 @@ class Serializer(event_model.DocumentRouter):
             filled_datums.append(datum_method(datum_doc))
 
     def stop(self, doc):
-        self._run_stop_collection.insert_one(doc)
+        self._insert('stop', doc)
 
     def __repr__(self):
         # Display connection info in eval-able repr.
