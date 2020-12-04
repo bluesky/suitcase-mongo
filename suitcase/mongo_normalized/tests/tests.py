@@ -86,6 +86,7 @@ def test_validation_error(db_factory, example_data):
     with pytest.raises(ValidationError):
         assert serializer.update('start', {})
 
+
 def test_index_creation(db_factory):
     db = db_factory()
     print(type(db))

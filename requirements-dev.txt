@@ -8,6 +8,7 @@ ophyd
 pytest >=3.9
 sphinx
 suitcase-utils[test_fixtures] >=0.1.0rc2
+mongomock
 # These are dependencies of various sphinx extensions for documentation.
 ipython
 matplotlib
