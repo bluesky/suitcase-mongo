@@ -109,7 +109,7 @@ def test_index_creation(db_factory):
     assert indexes['uid_1']['unique']
     assert indexes['time_-1_scan_id_-1']
     assert indexes['$**_text']
-    assert indexes['auth_session_1']
+    assert indexes['data_session_1']
 
     indexes = metadatastore_db.run_stop.index_information()
     assert len(indexes.keys()) == 5
