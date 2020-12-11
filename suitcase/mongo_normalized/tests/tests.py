@@ -98,7 +98,7 @@ def test_index_creation(db_factory):
     assert len(indexes.keys()) == 3
     assert indexes['uid_1']['unique']
     assert indexes['resource_id_1']
-    
+
     indexes = asset_registry_db.datum.index_information()
     assert len(indexes.keys()) == 3
     assert indexes['datum_id_1']['unique']
