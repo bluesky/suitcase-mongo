@@ -85,3 +85,47 @@ def test_validation_error(db_factory, example_data):
     serializer = Serializer(metadatastore_db, asset_registry_db)
     with pytest.raises(ValidationError):
         assert serializer.update('start', {})
+
+
+def test_index_creation(db_factory):
+    db = db_factory()
+    print(type(db))
+    metadatastore_db = db_factory()
+    asset_registry_db = db_factory()
+    Serializer(metadatastore_db, asset_registry_db)
+
+    indexes = asset_registry_db.resource.index_information()
+    assert len(indexes.keys()) == 3
+    assert indexes['uid_1']['unique']
+    assert indexes['resource_id_1']
+
+    indexes = asset_registry_db.datum.index_information()
+    assert len(indexes.keys()) == 3
+    assert indexes['datum_id_1']['unique']
+    assert indexes['resource_1']
+
+    indexes = metadatastore_db.run_start.index_information()
+    assert len(indexes.keys()) == 5
+    assert indexes['uid_1']['unique']
+    assert indexes['time_-1_scan_id_-1']
+    assert indexes['$**_text']
+    assert indexes['data_session_1']
+
+    indexes = metadatastore_db.run_stop.index_information()
+    assert len(indexes.keys()) == 5
+    assert indexes['uid_1']['unique']
+    assert indexes['run_start_1']['unique']
+    assert indexes['time_-1']
+    assert indexes['$**_text']
+
+    indexes = metadatastore_db.event_descriptor.index_information()
+    assert len(indexes.keys()) == 5
+    assert indexes['uid_1']['unique']
+    assert indexes['run_start_-1_time_-1']
+    assert indexes['time_-1']
+    assert indexes['$**_text']
+
+    indexes = metadatastore_db.event.index_information()
+    assert len(indexes.keys()) == 3
+    assert indexes['uid_1']['unique']
+    assert indexes['descriptor_-1_time_1']
