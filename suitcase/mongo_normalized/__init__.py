@@ -74,6 +74,7 @@ class Serializer(event_model.DocumentRouter):
             unique=False, background=True)
         self._run_start_collection.create_index([("$**", "text")])
         self._run_start_collection.create_index('data_session', unique=False)
+        self._run_start_collection.create_index('data_groups', unique=False)
         self._run_stop_collection.create_index('run_start', unique=True)
         self._run_stop_collection.create_index('uid', unique=True)
         self._run_stop_collection.create_index(
