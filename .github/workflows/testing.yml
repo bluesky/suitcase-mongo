@@ -35,7 +35,7 @@ jobs:
       shell: bash -l {0}
       run: |
         set -vxeuo pipefail
-        python -m pip install -r requirements-test.txt
+        python -m pip install -r requirements-dev.txt
         python -m pip list
 
     - name: Test with pytest
