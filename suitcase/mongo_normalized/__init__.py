@@ -8,7 +8,7 @@ del get_versions
 
 class Serializer(event_model.DocumentRouter):
     def __init__(self, metadatastore_db, asset_registry_db,
-                 ignore_duplicates=True):
+                 ignore_duplicates=True, resource_uid_unique=False):
         """
         Insert documents into MongoDB using layout v1.
 
@@ -30,6 +30,12 @@ class Serializer(event_model.DocumentRouter):
             have in the database, we check that their contents are identical.
             If they are, we silently ignore the duplicate. If this is set to
             False, we always raise DuplicateUniqueID.
+        resource_uid_unique : boolean, optional
+            For historical reasons, we cannot create a *unique* index on
+            Resource uid. Once databroker.v0 is retried and any old databases
+            that violate uniqueness of Resource uid are migrated, this may be
+            flipped to True. For now, it is False by default and generally
+            should not be flipped to True until those conditions are met.
         """
         if isinstance(metadatastore_db, str):
             mds_db = _get_database(metadatastore_db)
@@ -59,6 +65,7 @@ class Serializer(event_model.DocumentRouter):
         self._metadatastore_db = mds_db
         self._asset_registry_db = assets_db
         self._ignore_duplicates = ignore_duplicates
+        self._resource_uid_unique = resource_uid_unique
         self._create_indexes()
 
     def _create_indexes(self):
@@ -67,7 +74,8 @@ class Serializer(event_model.DocumentRouter):
 
         If the index already exists, this has no effect.
         """
-        self._resource_collection.create_index('uid')
+        self._resource_collection.create_index(
+            'uid', self._resource_uid_unique)
         self._resource_collection.create_index('resource_id')  # legacy
         # TODO: Migrate all Resources to have a RunStart UID, and then make a
         # unique index on:
@@ -176,16 +184,19 @@ class Serializer(event_model.DocumentRouter):
         # Here we are "asking permission" rather than "begging forgiveness". It
         # is slow, but since there are never a large number of Resources per
         # Run, this is acceptable.
-        existing = self._collections["resource"].find_one({'uid': doc['uid']}, {'_id': False})
-        if existing is not None:
-            if existing != doc:
-                raise DuplicateUniqueID(
-                    "A document with the same unique id as this one "
-                    "already exists in the database, and it has different "
-                    "contents.\n"
-                    f"Existing document:\n{existing}\nNew document:\n{doc}"
-                )
-        self._collections["resource"].insert_one(doc)
+        if self._resource_uid_unique:
+            self._insert('resource', doc)
+        else:
+            existing = self._collections["resource"].find_one({'uid': doc['uid']}, {'_id': False})
+            if existing is not None:
+                if existing != doc:
+                    raise DuplicateUniqueID(
+                        "A document with the same unique id as this one "
+                        "already exists in the database, and it has different "
+                        "contents.\n"
+                        f"Existing document:\n{existing}\nNew document:\n{doc}"
+                    )
+            self._collections["resource"].insert_one(doc)
 
     def event(self, doc):
         self._insert('event', doc)
