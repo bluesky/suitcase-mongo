@@ -1,5 +1,7 @@
 # suitcase.mongo
 
+[![Build Status](https://img.shields.io/github/workflow/status/bluesky/suitcase-mongo/Unit%20Tests)](https://github.com/bluesky/suitcase-mongo/actions?query=workflow%3A%22Unit+Tests%22+branch%3Amaster)
+
 This is a suitcase subpackage for inserting bluesky documents into MongoDB. It
 contains two packages:
 
