@@ -23,7 +23,13 @@ class Serializer(event_model.DocumentRouter):
         ----------
         metadatastore_db : pymongo.Database or URI
         asset_registry_db : pymongo.Database or URI
-        ignore_duplicates : boolean
+        ignore_duplicates : boolean, optional
+            When receiving from a message bus, it is difficult to ensure that
+            we will never receive the same document more than once. If this is
+            set to True, when we receive a document with a uid that we already
+            have in the database, we check that their contents are identical.
+            If they are, we silently ignore the duplicate. If this is set to
+            False, we always raise DuplicateUniqueID.
         """
         if isinstance(metadatastore_db, str):
             mds_db = _get_database(metadatastore_db)
@@ -103,12 +109,20 @@ class Serializer(event_model.DocumentRouter):
             self._collections[name].insert_one(doc)
         except pymongo.errors.DuplicateKeyError as err:
             if not self._ignore_duplicates:
-                raise err
+                raise DuplicateUniqueID(
+                    "A document with the same unique id as this one "
+                    f"already exists in the database. Document:\n{doc}"
+                ) from err
             else:
                 doc.pop('_id')
                 existing = self._collections[name].find_one({'uid': doc['uid']}, {'_id': False})
                 if existing != doc:
-                    raise err
+                    raise DuplicateUniqueID(
+                        "A document with the same unique id as this one "
+                        "already exists in the database, and it has different "
+                        "contents.\n"
+                        f"Existing document:\n{existing}\nNew document:\n{doc}"
+                    ) from err
 
     def update(self, name, doc):
         """
@@ -207,3 +221,7 @@ def _get_database(uri):
         raise ValueError(
             f"Invalid client: {client} "
             f"Did you forget to include a database?") from err
+
+
+class DuplicateUniqueID(Exception):
+    ...

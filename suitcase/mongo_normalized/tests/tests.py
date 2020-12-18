@@ -5,8 +5,7 @@ import copy
 import pytest
 from event_model import sanitize_doc
 from jsonschema import ValidationError
-from pymongo.errors import DuplicateKeyError
-from suitcase.mongo_normalized import Serializer
+from suitcase.mongo_normalized import DuplicateUniqueID, Serializer
 
 
 def test_export(db_factory, example_data):
@@ -32,7 +31,7 @@ def test_duplicates(db_factory, example_data):
     # Modify a document, check that inserting a document with uid,
     # but different content raises.
     documents[0][1]['new_key'] = 'new_value'
-    with pytest.raises(DuplicateKeyError):
+    with pytest.raises(DuplicateUniqueID):
         for item in documents:
             serializer(*item)
 
