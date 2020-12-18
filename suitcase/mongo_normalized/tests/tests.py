@@ -129,3 +129,14 @@ def test_index_creation(db_factory):
     assert len(indexes.keys()) == 3
     assert indexes['uid_1']['unique']
     assert indexes['descriptor_-1_time_1']
+
+
+def test_resource_uid_unique(db_factory):
+    db = db_factory()
+    print(type(db))
+    metadatastore_db = db_factory()
+    asset_registry_db = db_factory()
+    Serializer(metadatastore_db, asset_registry_db, resource_uid_unique=True)
+
+    indexes = asset_registry_db.resource.index_information()
+    assert indexes['uid_1'].get('unique')
