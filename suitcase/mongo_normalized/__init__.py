@@ -169,7 +169,23 @@ class Serializer(event_model.DocumentRouter):
         self._insert('descriptor', doc)
 
     def resource(self, doc):
-        self._insert('resource', doc)
+        # In old databases, we know there are duplicates Resources. Until we
+        # clean those up, we cannot create a *unique* index on Resource uid, so
+        # cannot rely the database insertion process to alert us to key
+        # collisions. We need to take a special approach for Resources.
+        # Here we are "asking permission" rather than "begging forgiveness". It
+        # is slow, but since there are never a large number of Resources per
+        # Run, this is acceptable.
+        existing = self._collections["resource"].find_one({'uid': doc['uid']}, {'_id': False})
+        if existing is not None:
+            if existing != doc:
+                raise DuplicateUniqueID(
+                    "A document with the same unique id as this one "
+                    "already exists in the database, and it has different "
+                    "contents.\n"
+                    f"Existing document:\n{existing}\nNew document:\n{doc}"
+                )
+        self._collections["resource"].insert_one(doc)
 
     def event(self, doc):
         self._insert('event', doc)
