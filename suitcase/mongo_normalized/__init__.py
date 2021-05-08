@@ -123,7 +123,11 @@ class Serializer(event_model.DocumentRouter):
                 ) from err
             else:
                 doc.pop('_id')
-                existing = self._collections[name].find_one({'uid': doc['uid']}, {'_id': False})
+                if name == "datum":
+                    id_name = "datum_id"
+                else:
+                    id_name = "uid"
+                existing = self._collections[name].find_one({id_name: doc[id_name]}, {'_id': False})
                 if existing != doc:
                     raise DuplicateUniqueID(
                         "A document with the same unique id as this one "
