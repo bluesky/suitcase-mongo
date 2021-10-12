@@ -2,7 +2,7 @@
 Release History
 ===============
 
-Release 0.3.1 (2021-10-08)
+Release 0.3.1 (2021-10-12)
 --------------------------
 
 - Fix bug in the duplicate-handling path for Datum.
