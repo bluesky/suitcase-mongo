@@ -8,7 +8,8 @@ del get_versions
 
 class Serializer(event_model.DocumentRouter):
     def __init__(self, metadatastore_db, asset_registry_db,
-                 ignore_duplicates=True, resource_uid_unique=False):
+                 ignore_duplicates=True, resource_uid_unique=False,
+                 tls=False):
         """
         Insert documents into MongoDB using layout v1.
 
@@ -36,13 +37,15 @@ class Serializer(event_model.DocumentRouter):
             that violate uniqueness of Resource uid are migrated, this may be
             flipped to True. For now, it is False by default and generally
             should not be flipped to True until those conditions are met.
+        tls : boolean, optional
+            Set to True if database connection should use tls.
         """
         if isinstance(metadatastore_db, str):
-            mds_db = _get_database(metadatastore_db)
+            mds_db = _get_database(metadatastore_db, tls)
         else:
             mds_db = metadatastore_db
         if isinstance(asset_registry_db, str):
-            assets_db = _get_database(asset_registry_db)
+            assets_db = _get_database(asset_registry_db, tls)
         else:
             assets_db = asset_registry_db
         self._run_start_collection = mds_db.get_collection('run_start')
@@ -240,13 +243,13 @@ class Serializer(event_model.DocumentRouter):
                 f'asset_registry_db={self._asset_registry_db!r})')
 
 
-def _get_database(uri):
+def _get_database(uri, tls):
     if not pymongo.uri_parser.parse_uri(uri)['database']:
         raise ValueError(
             f"Invalid URI: {uri} "
             f"Did you forget to include a database?")
     else:
-        client = pymongo.MongoClient(uri)
+        client = pymongo.MongoClient(uri, tls=tls)
         return client.get_database()
 
 
