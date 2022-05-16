@@ -89,7 +89,7 @@ class Serializer(event_model.DocumentRouter):
         self._run_start_collection.create_index('scan_id', unique=False)
         self._run_start_collection.create_index(
             [('scan_id', pymongo.DESCENDING), ('_id', pymongo.DESCENDING)],
-            unique=False)
+            unique=True)
         self._run_start_collection.create_index(
             [('time', pymongo.DESCENDING), ('scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
