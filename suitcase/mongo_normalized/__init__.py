@@ -91,6 +91,9 @@ class Serializer(event_model.DocumentRouter):
             [('scan_id', pymongo.DESCENDING), ('_id', pymongo.DESCENDING)],
             unique=True)
         self._run_start_collection.create_index(
+            [('time', pymongo.DESCENDING), ('_id', pymongo.DESCENDING)],
+            unique=True)
+        self._run_start_collection.create_index(
             [('time', pymongo.DESCENDING), ('scan_id', pymongo.DESCENDING)],
             unique=False, background=True)
         self._run_start_collection.create_index([("$**", "text")])
