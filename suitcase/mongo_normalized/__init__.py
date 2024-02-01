@@ -166,14 +166,16 @@ class Serializer(event_model.DocumentRouter):
             The new version of the document. Its uid will be used to match it
             to the current version, the one to be updated.
         """
-        if name in ['start', 'stop']:
-            key = 'run_start' if name == 'stop' else 'uid'
+        if name in ['start', 'stop', 'descriptor']:
+            # Keys and collection names differ slightly between start, stop and descriptor
+            key = 'uid' if name == 'start' else 'run_start'
+            name = f'_event_{name}' if name == 'descriptor' else f'_run_{name}'
             event_model.schema_validators[event_model.DocumentNames.start].validate(doc)
-            current_col = getattr(self, f'_run_{name}_collection')
-            revisions_col = getattr(self, f'_run_{name}_collection_revisions')
+            current_col = getattr(self, f'{name}_collection')
+            revisions_col = getattr(self, f'{name}_collection_revisions')
             old = current_col.find_one({key: doc[key]})
-            if (old is None and name == 'stop'):
-                # New stop document : insert it
+            if (old is None and (name == '_run_stop' or name == '_event_descriptor')):
+                # New stop or descriptor document : insert it
                 current_col.insert_one(doc)
             else:
                 old.pop('_id')
