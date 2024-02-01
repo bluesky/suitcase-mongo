@@ -61,6 +61,9 @@ class Serializer(event_model.DocumentRouter):
         self._run_stop_collection_revisions = mds_db.get_collection(
             "run_stop_revisions"
         )
+        self._event_descriptor_collection_revisions = mds_db.get_collection(
+            "event_descriptor_revisions"
+        )
         self._event_descriptor_collection = mds_db.get_collection("event_descriptor")
         self._event_collection = mds_db.get_collection("event")
 
