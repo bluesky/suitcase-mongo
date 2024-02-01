@@ -51,6 +51,7 @@ class Serializer(event_model.DocumentRouter):
         self._run_start_collection = mds_db.get_collection('run_start')
         self._run_start_collection_revisions = mds_db.get_collection('run_start_revisions')
         self._run_stop_collection = mds_db.get_collection('run_stop')
+        self._run_stop_collection_revisions = mds_db.get_collection('run_stop_revisions')
         self._event_descriptor_collection = mds_db.get_collection(
                                                         'event_descriptor')
         self._event_collection = mds_db.get_collection('event')
@@ -159,9 +160,8 @@ class Serializer(event_model.DocumentRouter):
         Parameters
         ----------
 
-        name: {'start'}
-            The type of document being updated. Currently, only 'start' is
-            supported and any other value here will raise NotImplementedError.
+        name: {'start'} OR {'stop'} OR {'descriptor'}
+            The type of document being updated.
         doc: dict
             The new version of the document. Its uid will be used to match it
             to the current version, the one to be updated.
@@ -182,6 +182,27 @@ class Serializer(event_model.DocumentRouter):
             wrapped['document'] = old
             revisions_col.insert_one(wrapped)
             current_col.find_one_and_replace({'uid': doc['uid']}, doc)
+        elif name == 'stop':
+            event_model.schema_validators[event_model.DocumentNames.stop].validate(doc)
+            current_col = self._run_stop_collection
+            revisions_col = self._run_stop_collection_revisions
+            old = current_col.find_one({'run_start': doc['run_start']})
+            if (old is None):
+                # New stop document : insert it
+                current_col.insert_one(doc)
+            else:
+                old.pop('_id')
+                target_uid_docs = revisions_col.find({'document.uid': doc['uid']})
+                cur = target_uid_docs.sort([('revision', pymongo.DESCENDING)]).limit(1)
+                wrapped = dict()
+                try:
+                    wrapped['revision'] = next(cur)['revision'] + 1
+                except StopIteration:
+                    wrapped['revision'] = 0
+                wrapped['document'] = old
+                revisions_col.insert_one(wrapped)
+                current_col.find_one_and_replace({'run_start': doc['run_start']}, doc)
+
         else:
             raise NotImplementedError(
                 f"Updating a {name} document is not currently supported. "
