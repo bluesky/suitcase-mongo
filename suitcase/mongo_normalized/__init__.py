@@ -166,33 +166,18 @@ class Serializer(event_model.DocumentRouter):
             The new version of the document. Its uid will be used to match it
             to the current version, the one to be updated.
         """
-        if name == 'start':
+        if name in ['start', 'stop']:
+            key = 'run_start' if name == 'stop' else 'uid'
             event_model.schema_validators[event_model.DocumentNames.start].validate(doc)
-            current_col = self._run_start_collection
-            revisions_col = self._run_start_collection_revisions
-            old = current_col.find_one({'uid': doc['uid']})
-            old.pop('_id')
-            target_uid_docs = revisions_col.find({'document.uid': doc['uid']})
-            cur = target_uid_docs.sort([('revision', pymongo.DESCENDING)]).limit(1)
-            wrapped = dict()
-            try:
-                wrapped['revision'] = next(cur)['revision'] + 1
-            except StopIteration:
-                wrapped['revision'] = 0
-            wrapped['document'] = old
-            revisions_col.insert_one(wrapped)
-            current_col.find_one_and_replace({'uid': doc['uid']}, doc)
-        elif name == 'stop':
-            event_model.schema_validators[event_model.DocumentNames.stop].validate(doc)
-            current_col = self._run_stop_collection
-            revisions_col = self._run_stop_collection_revisions
-            old = current_col.find_one({'run_start': doc['run_start']})
-            if (old is None):
+            current_col = getattr(self, f'_run_{name}_collection')
+            revisions_col = getattr(self, f'_run_{name}_collection_revisions')
+            old = current_col.find_one({key: doc[key]})
+            if (old is None and name == 'stop'):
                 # New stop document : insert it
                 current_col.insert_one(doc)
             else:
                 old.pop('_id')
-                target_uid_docs = revisions_col.find({'document.uid': doc['uid']})
+                target_uid_docs = revisions_col.find({'document.uid': doc[key]})
                 cur = target_uid_docs.sort([('revision', pymongo.DESCENDING)]).limit(1)
                 wrapped = dict()
                 try:
@@ -201,8 +186,7 @@ class Serializer(event_model.DocumentRouter):
                     wrapped['revision'] = 0
                 wrapped['document'] = old
                 revisions_col.insert_one(wrapped)
-                current_col.find_one_and_replace({'run_start': doc['run_start']}, doc)
-
+                current_col.find_one_and_replace({key : doc[key]}, doc)
         else:
             raise NotImplementedError(
                 f"Updating a {name} document is not currently supported. "
