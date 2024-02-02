@@ -193,7 +193,7 @@ class Serializer(event_model.DocumentRouter):
                 getattr(event_model.DocumentNames, name)
             ].validate(doc)
             # Keys and collection names differ slightly between start, stop and descriptor
-            key = "uid" if name == "start" else "run_start"
+            key = "uid"
             name = f"_event_{name}" if name == "descriptor" else f"_run_{name}"
             current_col = getattr(self, f"{name}_collection")
             revisions_col = getattr(self, f"{name}_collection_revisions")

@@ -49,23 +49,31 @@ def test_update(db_factory, example_data):
     # (1) Make mutable copies
     start = copy.deepcopy(original_start)
     stop = copy.deepcopy(original_stop)
+    descriptor = copy.deepcopy(original_descriptor)
     # (2) Update a property of the copies
     start["user"] = "first updated temp user"
     serializer.update("start", start)
     stop["reason"] = "Everything happens for a reason."
     serializer.update("stop", stop)
+    descriptor["name"] = "secondary"
+    serializer.update("descriptor", descriptor)
     # (3) Get the updated record from the database to confirm changes
     real_start = metadatastore_db.get_collection("run_start").find_one(
         {"uid": start["uid"]}
     )
     real_start.pop("_id")
     real_stop = metadatastore_db.get_collection("run_stop").find_one(
-        {"run_start": stop["run_start"]}
+        {"uid": stop["uid"]}
     )
     real_stop.pop("_id")
+    real_descriptor = metadatastore_db.get_collection("event_descriptor").find_one(
+        {"uid": descriptor["uid"]}
+    )
+    real_descriptor.pop("_id")
     # (4) Test the data
     assert sanitize_doc(real_start) == sanitize_doc(start)
     assert sanitize_doc(real_stop) == sanitize_doc(stop)
+    assert sanitize_doc(real_descriptor) == sanitize_doc(descriptor)
     # (5) Test the revisions
     revision_start = metadatastore_db.get_collection("run_start_revisions").find_one(
         {"document.uid": start["uid"]}
@@ -76,12 +84,22 @@ def test_update(db_factory, example_data):
     assert sanitize_doc(revision_start["document"]) == sanitize_doc(original_start)
 
     revision_stop = metadatastore_db.get_collection("run_stop_revisions").find_one(
-        {"document.run_start": stop["run_start"]}
+        {"document.uid": stop["uid"]}
     )
     assert revision_stop["revision"] == 0
     revision_stop.pop("revision")
     revision_stop.pop("_id")
     assert sanitize_doc(revision_stop["document"]) == sanitize_doc(original_stop)
+
+    revision_descriptor = metadatastore_db.get_collection(
+        "event_descriptor_revisions"
+    ).find_one({"document.uid": descriptor["uid"]})
+    assert revision_descriptor["revision"] == 0
+    revision_descriptor.pop("revision")
+    revision_descriptor.pop("_id")
+    assert sanitize_doc(revision_descriptor["document"]) == sanitize_doc(
+        original_descriptor
+    )
 
     # (6) Test another revision
     revision1_start = copy.deepcopy(start)
@@ -96,7 +114,7 @@ def test_update(db_factory, example_data):
     real_start.pop("_id")
     assert sanitize_doc(real_start) == sanitize_doc(start)
     real_stop = metadatastore_db.get_collection("run_stop").find_one(
-        {"run_start": stop["run_start"]}
+        {"uid": stop["uid"]}
     )
     real_stop.pop("_id")
     assert sanitize_doc(real_stop) == sanitize_doc(stop)
@@ -107,7 +125,7 @@ def test_update(db_factory, example_data):
     revision_start.pop("revision")
     revision_start.pop("_id")
     revision_stop = metadatastore_db.get_collection("run_stop_revisions").find_one(
-        {"document.run_start": stop["run_start"], "revision": 1}
+        {"document.uid": stop["uid"], "revision": 1}
     )
     assert revision_stop["revision"] == 1
     revision_stop.pop("revision")
