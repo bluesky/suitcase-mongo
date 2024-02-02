@@ -43,9 +43,9 @@ def test_update(db_factory, example_data):
     serializer = Serializer(metadatastore_db, asset_registry_db)
     for item in documents:
         serializer(*item)
-    original_start = next(item[1] for item in documents if item[0] == 'start')
-    original_stop = next(item[1] for item in documents if item[0] == 'stop')
-    original_descriptor = next(item[1] for item in documents if item[0] == 'descriptor')
+    original_start = next(item[1] for item in documents if item[0] == "start")
+    original_stop = next(item[1] for item in documents if item[0] == "stop")
+    original_descriptor = next(item[1] for item in documents if item[0] == "descriptor")
     # (1) Make mutable copies
     start = copy.deepcopy(original_start)
     stop = copy.deepcopy(original_stop)
@@ -55,14 +55,18 @@ def test_update(db_factory, example_data):
     stop["reason"] = "Everything happens for a reason."
     serializer.update("stop", stop)
     # (3) Get the updated record from the database to confirm changes
-    real_start = metadatastore_db.get_collection("run_start").find_one({"uid": start["uid"]})
+    real_start = metadatastore_db.get_collection("run_start").find_one(
+        {"uid": start["uid"]}
+    )
     real_start.pop("_id")
-    real_stop = metadatastore_db.get_collection("run_stop").find_one({"run_start": stop["run_start"]})
+    real_stop = metadatastore_db.get_collection("run_stop").find_one(
+        {"run_start": stop["run_start"]}
+    )
     real_stop.pop("_id")
     # (4) Test the data
     assert sanitize_doc(real_start) == sanitize_doc(start)
     assert sanitize_doc(real_stop) == sanitize_doc(stop)
-    # (5) Test the revisions    
+    # (5) Test the revisions
     revision_start = metadatastore_db.get_collection("run_start_revisions").find_one(
         {"document.uid": start["uid"]}
     )
@@ -79,20 +83,37 @@ def test_update(db_factory, example_data):
     revision_stop.pop("_id")
     assert sanitize_doc(revision_stop["document"]) == sanitize_doc(original_stop)
 
-
-    revision1 = copy.deepcopy(start)
+    # (6) Test another revision
+    revision1_start = copy.deepcopy(start)
+    revision1_stop = copy.deepcopy(stop)
     start["user"] = "second updated temp user"
     serializer.update("start", start)
-    real = metadatastore_db.get_collection("run_start").find_one({"uid": start["uid"]})
-    real.pop("_id")
-    assert sanitize_doc(real) == sanitize_doc(start)
-    revision = metadatastore_db.get_collection("run_start_revisions").find_one(
+    stop["reason"] = "Nothing happens for a reason."
+    serializer.update("stop", stop)
+    real_start = metadatastore_db.get_collection("run_start").find_one(
+        {"uid": start["uid"]}
+    )
+    real_start.pop("_id")
+    assert sanitize_doc(real_start) == sanitize_doc(start)
+    real_stop = metadatastore_db.get_collection("run_stop").find_one(
+        {"run_start": stop["run_start"]}
+    )
+    real_stop.pop("_id")
+    assert sanitize_doc(real_stop) == sanitize_doc(stop)
+    revision_start = metadatastore_db.get_collection("run_start_revisions").find_one(
         {"document.uid": start["uid"], "revision": 1}
     )
-    assert revision["revision"] == 1
-    revision.pop("revision")
-    revision.pop("_id")
-    assert sanitize_doc(revision["document"]) == sanitize_doc(revision1)
+    assert revision_start["revision"] == 1
+    revision_start.pop("revision")
+    revision_start.pop("_id")
+    # revision_stop = metadatastore_db.get_collection("run_stop_revisions").find_one(
+    # {"document.run_start": stop["run_start"],'revision': 1}
+    # )
+    # assert revision_stop["revision"] == 1
+    # revision_stop.pop("revision")
+    # revision_stop.pop("_id")
+    assert sanitize_doc(revision_start["document"]) == sanitize_doc(revision1_start)
+    # assert sanitize_doc(revision_stop["document"]) == sanitize_doc(revision1_stop)
 
 
 def test_notimplemented_error(db_factory, example_data):
