@@ -106,14 +106,14 @@ def test_update(db_factory, example_data):
     assert revision_start["revision"] == 1
     revision_start.pop("revision")
     revision_start.pop("_id")
-    # revision_stop = metadatastore_db.get_collection("run_stop_revisions").find_one(
-    # {"document.run_start": stop["run_start"],'revision': 1}
-    # )
-    # assert revision_stop["revision"] == 1
-    # revision_stop.pop("revision")
-    # revision_stop.pop("_id")
+    revision_stop = metadatastore_db.get_collection("run_stop_revisions").find_one(
+        {"document.run_start": stop["run_start"], "revision": 1}
+    )
+    assert revision_stop["revision"] == 1
+    revision_stop.pop("revision")
+    revision_stop.pop("_id")
     assert sanitize_doc(revision_start["document"]) == sanitize_doc(revision1_start)
-    # assert sanitize_doc(revision_stop["document"]) == sanitize_doc(revision1_stop)
+    assert sanitize_doc(revision_stop["document"]) == sanitize_doc(revision1_stop)
 
 
 def test_notimplemented_error(db_factory, example_data):
