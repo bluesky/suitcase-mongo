@@ -189,10 +189,10 @@ class Serializer(event_model.DocumentRouter):
             to the current version, the one to be updated.
         """
         if name in ["start", "stop", "descriptor"]:
+            event_model.schema_validators[getattr(event_model.DocumentNames, name)].validate(doc)
             # Keys and collection names differ slightly between start, stop and descriptor
             key = "uid" if name == "start" else "run_start"
             name = f"_event_{name}" if name == "descriptor" else f"_run_{name}"
-            event_model.schema_validators[getattr(event_model.DocumentNames, name)].validate(doc)
             current_col = getattr(self, f"{name}_collection")
             revisions_col = getattr(self, f"{name}_collection_revisions")
             old = current_col.find_one({key: doc[key]})
