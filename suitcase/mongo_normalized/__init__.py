@@ -203,6 +203,14 @@ class Serializer(event_model.DocumentRouter):
                 current_col.insert_one(doc)
             else:
                 old.pop("_id")
+                # Field Saftey Enforcement : Prevent restricted fields from changing
+                restricted_fields = ["run_start"]
+                for field in restricted_fields:
+                    if field in old and field in doc:
+                        if old[field] != doc[field]:
+                            raise ValueError(
+                                f"Field '{field}' is restricted and cannot be changed."
+                            )
                 target_uid_docs = revisions_col.find({"document.uid": doc["uid"]})
                 cur = target_uid_docs.sort([("revision", pymongo.DESCENDING)]).limit(1)
                 wrapped = dict()
