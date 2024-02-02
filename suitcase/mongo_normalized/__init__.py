@@ -299,4 +299,5 @@ def _get_database(uri, tls):
         return client.get_database()
 
 
-class DuplicateUniqueID(Exception): ...
+class DuplicateUniqueID(Exception): 
+    ...
