@@ -182,13 +182,13 @@ class Serializer(event_model.DocumentRouter):
         Parameters
         ----------
 
-        name: {'start'} OR {'stop'} OR {'descriptor'}
+        name: {'start', 'stop', 'descriptor'}
             The type of document being updated.
         doc: dict
             The new version of the document. Its uid will be used to match it
             to the current version, the one to be updated.
         """
-        if name in ["start", "stop", "descriptor"]:
+        if name in {"start", "stop", "descriptor"}:
             event_model.schema_validators[
                 getattr(event_model.DocumentNames, name)
             ].validate(doc)
