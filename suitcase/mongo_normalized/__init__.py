@@ -208,11 +208,9 @@ class Serializer(event_model.DocumentRouter):
                 for field in restricted_fields:
                     if field in old and field in doc:
                         if old[field] != doc[field]:
-                            # Allow the removal of restricted fields, but not update
-                            if doc[field] is not None:
-                                raise ValueError(
-                                    f"Field '{field}' is restricted and cannot be changed."
-                                )
+                            raise ValueError(
+                                f"Field '{field}' is restricted and cannot be changed."
+                            )
                 target_uid_docs = revisions_col.find({"document.uid": doc["uid"]})
                 cur = target_uid_docs.sort([("revision", pymongo.DESCENDING)]).limit(1)
                 wrapped = dict()
