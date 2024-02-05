@@ -208,7 +208,9 @@ class Serializer(event_model.DocumentRouter):
                 for field in restricted_fields:
                     if field in old and field in doc:
                         if old[field] != doc[field]:
-                            raise ValueError(
+                            # Allow the removal of restricted fields, but not update
+                            if doc[field] != None:
+                                raise ValueError(
                                 f"Field '{field}' is restricted and cannot be changed."
                             )
                 target_uid_docs = revisions_col.find({"document.uid": doc["uid"]})
@@ -224,7 +226,6 @@ class Serializer(event_model.DocumentRouter):
         else:
             raise NotImplementedError(
                 f"Updating a {name} document is not currently supported. "
-                f"Only updates to 'start' documents are supported."
             )
 
     def start(self, doc):
