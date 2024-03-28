@@ -83,9 +83,8 @@ class Serializer(event_model.DocumentRouter):
         self._asset_registry_db = assets_db
         self._ignore_duplicates = ignore_duplicates
         self._resource_uid_unique = resource_uid_unique
-        self._create_indexes()
 
-    def _create_indexes(self):
+    def create_indexes(self):
         """
         Create indexes on the various collections.
 
